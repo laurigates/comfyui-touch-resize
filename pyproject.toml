@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-touch-resize"
 description = "Selection-gated pinch-to-resize for ComfyUI nodes and groups on touch devices."
-version = "0.1.0"
+version = "0.1.1"
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.10"
