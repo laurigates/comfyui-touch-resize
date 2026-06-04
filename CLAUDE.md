@@ -91,6 +91,7 @@ Checked against
 | `LGraphGroup.recomputeInsideNodes()` | present; called after a group resize so it re-memberships the right nodes. |
 | `LGraphGroup.id` | defaults to `-1`, not guaranteed unique → target key falls back to selection index. |
 | Native zoom | **wheel-driven** (`processMouseWheel` → `ds.changeScale`; browsers send pinch-zoom as ctrl+wheel). The pack therefore intercepts `wheel` (capture, `passive:false`) while a gesture is locked, in addition to `stopImmediatePropagation` on pointer events. |
+| Listener phase (critical) | LiteGraph binds its pointer/wheel handlers on the **canvas element** in its constructor — *before* our `setup()`. Those events TARGET that element, so in the `AT_TARGET` phase listeners fire in **registration order, capture flag ignored** → a capture listener on `el` still runs *after* LiteGraph and loses the race. The suppression layer therefore binds on an **ancestor (`window`) in the capture phase**, which provably precedes any `AT_TARGET` listener. Without this the canvas zooms *and* the node body-drags while we resize (groups felt fine only because they drag by their title bar, not their body). |
 
 ## Browser smoke matrix (manual)
 
@@ -110,11 +111,12 @@ Unit tests cover the pure logic; these must be verified live (devtools console
 
 **Open items still needing a real device** (sourcemap can't settle these):
 
-- **Native-zoom suppression (risk #2):** confirm the `wheel` interceptor
-  actually stops zoom during a lock. If the canvas sets `touch-action: none`
-  and pinch arrives purely as pointer events (no wheel), the pointer
-  `stopImmediatePropagation` already covers it; the wheel handler is the hedge
-  for the ctrl+wheel path.
+- **Native-zoom suppression (risk #2):** ~~confirm the `wheel` interceptor~~
+  **Resolved on-device:** the original wiring bound on `el`, so LiteGraph's
+  earlier-registered handlers won the `AT_TARGET` race and the canvas zoomed
+  (and nodes body-dragged) *while* resizing. The suppression layer now binds on
+  `window` in the capture phase (see "Listener phase" above), plus a
+  `touchstart/move/end` hedge and `touch-action:none`. Re-verify matrix #1–#3.
 - **Anisotropic feel (risk #5):** finger rotation while spreading can feel
   unpredictable — validate on-device before flipping `mode` on by default.
 - **Hint coordinate space (risk #4):** current choice is constant-screen-size
