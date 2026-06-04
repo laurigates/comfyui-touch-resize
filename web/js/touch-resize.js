@@ -6,21 +6,31 @@
 //
 // Pattern ("the gesture vein"): instead of intercepting a single widget,
 // this pack adds a CANVAS-LEVEL pointer layer. A two-finger pinch whose
-// centroid lands inside a *selected* node (single tap selects it) resizes
-// that node and suppresses the native canvas zoom for the gesture's
-// duration. Additive + mobile-first: if app.canvas or the pointer model is
-// absent it does nothing and native corner-handle resize still works.
-// Resize only writes node.size (already serialized) so no workflow breaks.
+// centroid lands inside a *selected* node resizes that node and suppresses
+// the native canvas zoom for the gesture's duration. Additive + mobile-first:
+// if app.canvas or the pointer model is absent it does nothing and native
+// corner-handle resize still works. Resize only writes node.size (already
+// serialized) so no workflow breaks.
 //
-// Pure geometry helpers are exported and unit-tested (tests/js); the
-// DOM/canvas wiring below is exercised in the manual browser matrix.
+// ARCHITECTURE: the gesture decision-logic lives in a PURE reducer
+// (createGestureController) that takes plain data — active pointers, normalized
+// targets, config — and returns COMMANDS (lock / resize / release). It never
+// touches the DOM or `app`, so it is fully unit-tested in tests/js. The DOM
+// wiring (installGestureLayer) is a thin adapter: events → data, commands →
+// mutation. It is exercised in the manual browser matrix (see CLAUDE.md).
 
 import { app } from "../../../scripts/app.js";
 
 const EXT_NAME = "comfyui-touch-resize";
 
 // LiteGraph maps a canvas point p to screen space as (p + ds.offset) * ds.scale.
-const DEFAULT_TITLE_HEIGHT = 30; // LiteGraph.NODE_TITLE_HEIGHT default.
+// LiteGraph.NODE_TITLE_HEIGHT = 30 (confirmed against the frontend sourcemap).
+const DEFAULT_TITLE_HEIGHT = 30;
+
+// Module config. No in-UI settings for v1 — tweak here and hard-refresh.
+const CONFIG = {
+  mode: "uniform", // "uniform" (hypot scale) — "aniso" added later
+};
 
 // --- Pure helpers (unit-tested) ----------------------------------------- //
 
@@ -59,18 +69,118 @@ export function scaledSize(startSize, ratio, minSize = [0, 0]) {
   return [Math.max(minSize[0], startSize[0] * ratio), Math.max(minSize[1], startSize[1] * ratio)];
 }
 
-/** Selected nodes as an array, defensively across LiteGraph variants. */
+/**
+ * Selected nodes as an array, defensively across LiteGraph variants.
+ * `selected_nodes` is a Dictionary<LGraphNode> (nodes only); the `selectedItems`
+ * Set holds nodes, groups, and reroutes, so the fallback filters to items that
+ * look like nodes — pos + size + a computeSize() method (groups lack it).
+ */
 export function selectedNodes(canvas) {
   if (!canvas) return [];
   const sel = canvas.selected_nodes;
-  if (sel && typeof sel === "object") return Object.values(sel);
+  if (sel && typeof sel === "object" && !(sel instanceof Set)) return Object.values(sel);
   if (canvas.selectedItems instanceof Set) {
-    return [...canvas.selectedItems].filter((it) => it?.size && it?.pos);
+    return [...canvas.selectedItems].filter(
+      (it) => it?.pos && it?.size && typeof it.computeSize === "function",
+    );
   }
   return [];
 }
 
-// --- Wiring (DOM + canvas; browser-matrix tested) ----------------------- //
+/**
+ * Enumerate resize targets as normalized plain data the controller can reduce.
+ * @typedef {{id:string,kind:"node"|"group",obj:object,
+ *           screenRect:{x:number,y:number,w:number,h:number},
+ *           size:[number,number],minSize:[number,number]}} Target
+ * The controller treats a Target as opaque except id/screenRect/size/minSize;
+ * `obj` is the adapter's handle for applying the resulting command.
+ */
+export function resolveTargets(canvas, _cfg = CONFIG) {
+  const scale = canvas?.ds?.scale ?? 1;
+  const offset = canvas?.ds?.offset ?? [0, 0];
+  const targets = [];
+  const nodes = selectedNodes(canvas);
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    targets.push({
+      id: `node:${n.id ?? i}`,
+      kind: "node",
+      obj: n,
+      screenRect: nodeScreenRect(n, scale, offset),
+      size: [n.size[0], n.size[1]],
+      minSize: typeof n.computeSize === "function" ? n.computeSize() : [0, 0],
+    });
+  }
+  return targets;
+}
+
+// --- Pure controller (the unit-tested reducer) -------------------------- //
+
+/**
+ * Gesture reducer. Pure: holds private lock state, takes plain pointer/target
+ * data, returns commands. Never mutates nodes/groups or touches the DOM.
+ *
+ * @typedef {{id:number,x:number,y:number}} Pointer
+ * @param {typeof CONFIG} _cfg reserved for mode selection (see anisotropic mode)
+ */
+export function createGestureController(_cfg = CONFIG) {
+  // lock = null | { targetId, startDist, startSize:[w,h], minSize:[w,h] }
+  let lock = null;
+
+  return {
+    /**
+     * @param {Pointer[]} pointers active pointers (screen-local)
+     * @param {Target[]} targets resize candidates
+     * @returns {{type:"lock",targetId:string}|null}
+     */
+    onPointersChanged(pointers, targets) {
+      if (pointers.length !== 2 || lock) return null;
+      const [p1, p2] = pointers;
+      const c = centroid(p1, p2);
+      for (const t of targets) {
+        if (pointInRect(c.x, c.y, t.screenRect)) {
+          lock = {
+            targetId: t.id,
+            startDist: pinchDistance(p1, p2) || 1,
+            startSize: [t.size[0], t.size[1]],
+            minSize: t.minSize ?? [0, 0],
+          };
+          return { type: "lock", targetId: t.id };
+        }
+      }
+      return null;
+    },
+
+    /**
+     * @param {Pointer[]} pointers
+     * @returns {{type:"resize",targetId:string,size:[number,number]}|null}
+     */
+    onPointersMoved(pointers) {
+      if (!lock || pointers.length < 2) return null;
+      const [p1, p2] = pointers;
+      const ratio = pinchDistance(p1, p2) / lock.startDist;
+      const size = scaledSize(lock.startSize, ratio, lock.minSize);
+      return { type: "resize", targetId: lock.targetId, size };
+    },
+
+    /**
+     * @param {number} pointerCount remaining active pointers
+     * @returns {{type:"release",targetId:string}|null}
+     */
+    onPointerEnded(pointerCount) {
+      if (pointerCount >= 2 || !lock) return null;
+      const { targetId } = lock;
+      lock = null;
+      return { type: "release", targetId };
+    },
+
+    get locked() {
+      return lock !== null;
+    },
+  };
+}
+
+// --- Wiring (DOM + canvas adapter; browser-matrix tested) --------------- //
 
 function installGestureLayer() {
   const canvas = app.canvas;
@@ -80,40 +190,36 @@ function installGestureLayer() {
     return;
   }
 
-  const pointers = new Map(); // pointerId -> { x, y } in canvas-element-local space
-  let lock = null; // { node, startDist, startSize, minSize }
+  const controller = createGestureController(CONFIG);
+  const pointers = new Map(); // pointerId -> { id, x, y } in canvas-element-local space
+  let targetsById = new Map(); // Target.id -> Target (rebuilt per gesture)
 
   const localPoint = (e) => {
     const r = el.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
+  const pointerList = () => [...pointers.values()];
 
-  function tryStartPinch() {
-    if (pointers.size !== 2 || lock) return;
-    const [p1, p2] = [...pointers.values()];
-    const c = centroid(p1, p2);
-    const scale = canvas.ds?.scale ?? 1;
-    const offset = canvas.ds?.offset ?? [0, 0];
-    for (const node of selectedNodes(canvas)) {
-      if (pointInRect(c.x, c.y, nodeScreenRect(node, scale, offset))) {
-        const minSize = typeof node.computeSize === "function" ? node.computeSize() : [0, 0];
-        lock = {
-          node,
-          startDist: pinchDistance(p1, p2) || 1,
-          startSize: [node.size[0], node.size[1]],
-          minSize,
-        };
-        return;
-      }
-    }
-  }
+  const applyResize = (cmd) => {
+    const t = targetsById.get(cmd.targetId);
+    if (!t) return;
+    const [w, h] = cmd.size;
+    t.obj.size[0] = w;
+    t.obj.size[1] = h;
+    t.obj.onResize?.(t.obj.size);
+    canvas.setDirty(true, true);
+  };
 
   el.addEventListener(
     "pointerdown",
     (e) => {
-      pointers.set(e.pointerId, localPoint(e));
-      tryStartPinch();
-      if (lock) e.stopImmediatePropagation(); // suppress native pinch-zoom
+      pointers.set(e.pointerId, { id: e.pointerId, ...localPoint(e) });
+      if (pointers.size === 2 && !controller.locked) {
+        const targets = resolveTargets(canvas, CONFIG);
+        targetsById = new Map(targets.map((t) => [t.id, t]));
+        const cmd = controller.onPointersChanged(pointerList(), targets);
+        if (cmd?.type === "lock") e.stopImmediatePropagation(); // suppress native pinch handling
+      }
     },
     true,
   );
@@ -122,23 +228,35 @@ function installGestureLayer() {
     "pointermove",
     (e) => {
       if (!pointers.has(e.pointerId)) return;
-      pointers.set(e.pointerId, localPoint(e));
-      if (!lock || pointers.size < 2) return;
-      const [p1, p2] = [...pointers.values()];
-      const ratio = pinchDistance(p1, p2) / lock.startDist;
-      const [w, h] = scaledSize(lock.startSize, ratio, lock.minSize);
-      lock.node.size[0] = w;
-      lock.node.size[1] = h;
-      lock.node.onResize?.(lock.node.size);
-      canvas.setDirty(true, true);
-      e.stopImmediatePropagation();
+      pointers.set(e.pointerId, { id: e.pointerId, ...localPoint(e) });
+      if (!controller.locked) return;
+      const cmd = controller.onPointersMoved(pointerList());
+      if (cmd?.type === "resize") {
+        applyResize(cmd);
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
     },
     true,
   );
 
+  // Native canvas zoom is wheel-driven (processMouseWheel → ds.changeScale), and
+  // browsers deliver two-finger pinch-zoom as ctrl+wheel — so suppressing it
+  // during a locked gesture requires intercepting wheel, not just pointer events.
+  el.addEventListener(
+    "wheel",
+    (e) => {
+      if (controller.locked) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }
+    },
+    { capture: true, passive: false },
+  );
+
   const endPointer = (e) => {
     pointers.delete(e.pointerId);
-    if (pointers.size < 2) lock = null;
+    controller.onPointerEnded(pointers.size); // release command needs no DOM apply
   };
   el.addEventListener("pointerup", endPointer, true);
   el.addEventListener("pointercancel", endPointer, true);
@@ -150,11 +268,8 @@ app.registerExtension({
   name: "comfy.touch-resize",
   async setup() {
     installGestureLayer();
-    // TODO: groups — extend selectedNodes()/nodeScreenRect() to graph._groups
-    //   (group.pos/group.size; no title bar) so a pinch resizes groups too.
-    // TODO: discoverability — draw a faint corner affordance on selected nodes
-    //   (canvas onDrawForeground) so the pinch gesture is learnable.
-    // TODO: optional anisotropic mode — decompose the two-finger vector into
-    //   independent W/H instead of uniform scale (behind a config flag).
+    // TODO: groups — resolveTargets() will enumerate selected groups too.
+    // TODO: discoverability — draw a faint corner affordance on selected items.
+    // TODO: optional anisotropic mode — independent W/H from the finger vector.
   },
 });

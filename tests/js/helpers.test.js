@@ -1,0 +1,104 @@
+import { describe, expect, it } from "vitest";
+import {
+  centroid,
+  nodeScreenRect,
+  pinchDistance,
+  pointInRect,
+  resolveTargets,
+  scaledSize,
+  selectedNodes,
+} from "../../web/js/touch-resize.js";
+
+// Pure geometry/selection helpers. Importing the module also confirms the
+// registerExtension wiring loads cleanly under the node-environment harness.
+
+describe("pinchDistance / centroid", () => {
+  it("measures pinch distance", () => {
+    expect(pinchDistance({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(5);
+  });
+
+  it("computes the midpoint", () => {
+    expect(centroid({ x: 0, y: 0 }, { x: 10, y: 20 })).toEqual({ x: 5, y: 10 });
+  });
+});
+
+describe("pointInRect", () => {
+  const rect = { x: 10, y: 10, w: 100, h: 50 };
+  it("hit-tests inside", () => {
+    expect(pointInRect(50, 30, rect)).toBe(true);
+  });
+  it("rejects outside", () => {
+    expect(pointInRect(5, 30, rect)).toBe(false);
+  });
+  it("includes the edges", () => {
+    expect(pointInRect(10, 10, rect)).toBe(true);
+    expect(pointInRect(110, 60, rect)).toBe(true);
+  });
+});
+
+describe("nodeScreenRect", () => {
+  it("maps node graph coords to screen space and lifts the title bar", () => {
+    const node = { pos: [100, 200], size: [180, 90] };
+    const r = nodeScreenRect(node, 2, [0, 0], 30);
+    // x = (100+0)*2 = 200; body y = (200+0)*2 = 400; title lifts by 30*2 = 60.
+    expect(r).toEqual({ x: 200, y: 340, w: 360, h: 240 });
+  });
+
+  it("applies the ds offset before scaling", () => {
+    const node = { pos: [10, 10], size: [100, 100] };
+    const r = nodeScreenRect(node, 1, [5, 5], 0);
+    expect(r).toEqual({ x: 15, y: 15, w: 100, h: 100 });
+  });
+});
+
+describe("scaledSize", () => {
+  it("uniform-scales", () => {
+    expect(scaledSize([200, 100], 1.5)).toEqual([300, 150]);
+  });
+  it("clamps to the minimum", () => {
+    expect(scaledSize([200, 100], 0.1, [120, 60])).toEqual([120, 60]);
+  });
+});
+
+describe("selectedNodes", () => {
+  it("returns [] without a canvas", () => {
+    expect(selectedNodes(null)).toEqual([]);
+  });
+
+  it("reads the selected_nodes dictionary", () => {
+    const a = { id: 1, pos: [0, 0], size: [1, 1] };
+    const b = { id: 2, pos: [0, 0], size: [1, 1] };
+    expect(selectedNodes({ selected_nodes: { 1: a, 2: b } })).toEqual([a, b]);
+  });
+
+  it("falls back to selectedItems, keeping only node-shaped items", () => {
+    const node = { id: 1, pos: [0, 0], size: [10, 10], computeSize: () => [5, 5] };
+    const group = { id: 2, pos: [0, 0], size: [10, 10], title: "G" }; // no computeSize
+    const reroute = { id: 3, pos: [0, 0] }; // no size
+    const canvas = { selectedItems: new Set([node, group, reroute]) };
+    expect(selectedNodes(canvas)).toEqual([node]);
+  });
+});
+
+describe("resolveTargets (nodes)", () => {
+  it("normalizes selected nodes into Target data", () => {
+    const node = { id: 7, pos: [10, 20], size: [100, 50], computeSize: () => [40, 30] };
+    const canvas = { ds: { scale: 1, offset: [0, 0] }, selected_nodes: { 7: node } };
+    const targets = resolveTargets(canvas);
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({
+      id: "node:7",
+      kind: "node",
+      obj: node,
+      size: [100, 50],
+      minSize: [40, 30],
+    });
+    expect(targets[0].screenRect).toEqual(nodeScreenRect(node, 1, [0, 0]));
+  });
+
+  it("falls back to index ids when a node lacks an id", () => {
+    const node = { pos: [0, 0], size: [10, 10], computeSize: () => [1, 1] };
+    const canvas = { ds: { scale: 1, offset: [0, 0] }, selectedItems: new Set([node]) };
+    expect(resolveTargets(canvas)[0].id).toBe("node:0");
+  });
+});
