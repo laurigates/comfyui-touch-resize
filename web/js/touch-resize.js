@@ -30,6 +30,8 @@ const DEFAULT_TITLE_HEIGHT = 30;
 // Module config. No in-UI settings for v1 — tweak here and hard-refresh.
 const CONFIG = {
   mode: "uniform", // "uniform" (hypot scale) — "aniso" added later
+  // LGraphGroup self-clamps size to minWidth=140/minHeight=80; mirror that floor.
+  groupMinSize: [140, 80],
 };
 
 // --- Pure helpers (unit-tested) ----------------------------------------- //
@@ -88,6 +90,34 @@ export function selectedNodes(canvas) {
 }
 
 /**
+ * Group bounding rect in screen space. Unlike a node, a group's `pos` is the
+ * top-left of the whole box (its title is drawn inside), so there is NO
+ * title-bar offset to subtract.
+ */
+export function groupScreenRect(group, scale, offset) {
+  return {
+    x: (group.pos[0] + offset[0]) * scale,
+    y: (group.pos[1] + offset[1]) * scale,
+    w: group.size[0] * scale,
+    h: group.size[1] * scale,
+  };
+}
+
+/**
+ * Selected groups from the `selectedItems` Set, discriminated by shape (the
+ * LGraphGroup class is renamed under minification / forks, so `instanceof`
+ * is unreliable). A group has pos + size + a string `title` but, unlike a
+ * node, no computeSize() method; a reroute has no `size`.
+ */
+export function selectedGroups(canvas) {
+  if (!(canvas?.selectedItems instanceof Set)) return [];
+  return [...canvas.selectedItems].filter(
+    (it) =>
+      it?.pos && it?.size && typeof it.title === "string" && typeof it.computeSize !== "function",
+  );
+}
+
+/**
  * Enumerate resize targets as normalized plain data the controller can reduce.
  * @typedef {{id:string,kind:"node"|"group",obj:object,
  *           screenRect:{x:number,y:number,w:number,h:number},
@@ -95,7 +125,7 @@ export function selectedNodes(canvas) {
  * The controller treats a Target as opaque except id/screenRect/size/minSize;
  * `obj` is the adapter's handle for applying the resulting command.
  */
-export function resolveTargets(canvas, _cfg = CONFIG) {
+export function resolveTargets(canvas, cfg = CONFIG) {
   const scale = canvas?.ds?.scale ?? 1;
   const offset = canvas?.ds?.offset ?? [0, 0];
   const targets = [];
@@ -109,6 +139,20 @@ export function resolveTargets(canvas, _cfg = CONFIG) {
       screenRect: nodeScreenRect(n, scale, offset),
       size: [n.size[0], n.size[1]],
       minSize: typeof n.computeSize === "function" ? n.computeSize() : [0, 0],
+    });
+  }
+  const groups = selectedGroups(canvas);
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    // group.id defaults to -1 and is not guaranteed unique — fall back to index.
+    const key = g.id != null && g.id !== -1 ? g.id : `idx${i}`;
+    targets.push({
+      id: `group:${key}`,
+      kind: "group",
+      obj: g,
+      screenRect: groupScreenRect(g, scale, offset),
+      size: [g.size[0], g.size[1]],
+      minSize: cfg.groupMinSize ?? [0, 0],
     });
   }
   return targets;
@@ -206,7 +250,12 @@ function installGestureLayer() {
     const [w, h] = cmd.size;
     t.obj.size[0] = w;
     t.obj.size[1] = h;
-    t.obj.onResize?.(t.obj.size);
+    if (t.kind === "group") {
+      // Re-membership the group so dragging it still carries the right nodes.
+      t.obj.recomputeInsideNodes?.();
+    } else {
+      t.obj.onResize?.(t.obj.size);
+    }
     canvas.setDirty(true, true);
   };
 
@@ -268,7 +317,6 @@ app.registerExtension({
   name: "comfy.touch-resize",
   async setup() {
     installGestureLayer();
-    // TODO: groups — resolveTargets() will enumerate selected groups too.
     // TODO: discoverability — draw a faint corner affordance on selected items.
     // TODO: optional anisotropic mode — independent W/H from the finger vector.
   },

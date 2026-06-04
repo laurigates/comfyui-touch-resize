@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   centroid,
+  groupScreenRect,
   nodeScreenRect,
   pinchDistance,
   pointInRect,
   resolveTargets,
   scaledSize,
+  selectedGroups,
   selectedNodes,
 } from "../../web/js/touch-resize.js";
 
@@ -80,7 +82,35 @@ describe("selectedNodes", () => {
   });
 });
 
-describe("resolveTargets (nodes)", () => {
+describe("groupScreenRect", () => {
+  it("maps group graph coords to screen space with NO title offset", () => {
+    const group = { pos: [100, 200], size: [300, 150] };
+    const r = groupScreenRect(group, 2, [0, 0]);
+    expect(r).toEqual({ x: 200, y: 400, w: 600, h: 300 });
+  });
+
+  it("applies the ds offset before scaling", () => {
+    const group = { pos: [10, 10], size: [100, 100] };
+    expect(groupScreenRect(group, 1, [5, 5])).toEqual({ x: 15, y: 15, w: 100, h: 100 });
+  });
+});
+
+describe("selectedGroups", () => {
+  it("returns [] without a selectedItems Set", () => {
+    expect(selectedGroups({})).toEqual([]);
+    expect(selectedGroups(null)).toEqual([]);
+  });
+
+  it("keeps only group-shaped items (title, size, no computeSize)", () => {
+    const node = { pos: [0, 0], size: [10, 10], title: "N", computeSize: () => [1, 1] };
+    const group = { pos: [0, 0], size: [10, 10], title: "G" };
+    const reroute = { pos: [0, 0] };
+    const canvas = { selectedItems: new Set([node, group, reroute]) };
+    expect(selectedGroups(canvas)).toEqual([group]);
+  });
+});
+
+describe("resolveTargets (nodes + groups)", () => {
   it("normalizes selected nodes into Target data", () => {
     const node = { id: 7, pos: [10, 20], size: [100, 50], computeSize: () => [40, 30] };
     const canvas = { ds: { scale: 1, offset: [0, 0] }, selected_nodes: { 7: node } };
@@ -100,5 +130,37 @@ describe("resolveTargets (nodes)", () => {
     const node = { pos: [0, 0], size: [10, 10], computeSize: () => [1, 1] };
     const canvas = { ds: { scale: 1, offset: [0, 0] }, selectedItems: new Set([node]) };
     expect(resolveTargets(canvas)[0].id).toBe("node:0");
+  });
+
+  it("normalizes selected groups, using the config group min-size", () => {
+    const group = { id: 3, pos: [0, 0], size: [300, 200], title: "G" };
+    const canvas = { ds: { scale: 1, offset: [0, 0] }, selectedItems: new Set([group]) };
+    const targets = resolveTargets(canvas, { groupMinSize: [140, 80] });
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({
+      id: "group:3",
+      kind: "group",
+      obj: group,
+      size: [300, 200],
+      minSize: [140, 80],
+    });
+    expect(targets[0].screenRect).toEqual(groupScreenRect(group, 1, [0, 0]));
+  });
+
+  it("falls back to an index key when group.id is -1 (LiteGraph default)", () => {
+    const group = { id: -1, pos: [0, 0], size: [300, 200], title: "G" };
+    const canvas = { ds: { scale: 1, offset: [0, 0] }, selectedItems: new Set([group]) };
+    expect(resolveTargets(canvas, { groupMinSize: [140, 80] })[0].id).toBe("group:idx0");
+  });
+
+  it("emits nodes before groups so both share one resize path", () => {
+    const node = { id: 1, pos: [0, 0], size: [10, 10], title: "N", computeSize: () => [1, 1] };
+    const group = { id: 2, pos: [0, 0], size: [300, 200], title: "G" };
+    const canvas = {
+      ds: { scale: 1, offset: [0, 0] },
+      selectedItems: new Set([node, group]),
+    };
+    const targets = resolveTargets(canvas, { groupMinSize: [140, 80] });
+    expect(targets.map((t) => t.kind)).toEqual(["node", "group"]);
   });
 });

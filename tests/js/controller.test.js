@@ -130,6 +130,26 @@ describe("createGestureController — resize (uniform)", () => {
   });
 });
 
+describe("createGestureController — kind-agnostic (groups)", () => {
+  it("locks and resizes a group target through the same path", () => {
+    const c = createGestureController({ mode: "uniform" });
+    const groupTarget = nodeTarget({ id: "group:3", kind: "group", minSize: [140, 80] });
+    const lock = c.onPointersChanged(
+      [
+        { id: 1, x: 40, y: 50 },
+        { id: 2, x: 60, y: 50 },
+      ],
+      [groupTarget],
+    );
+    expect(lock).toEqual({ type: "lock", targetId: "group:3" });
+    const resize = c.onPointersMoved([
+      { id: 1, x: 30, y: 50 },
+      { id: 2, x: 70, y: 50 },
+    ]);
+    expect(resize).toEqual({ type: "resize", targetId: "group:3", size: [400, 200] });
+  });
+});
+
 describe("createGestureController — release", () => {
   it("releases the lock when pointers drop below two", () => {
     const c = createGestureController({ mode: "uniform" });
