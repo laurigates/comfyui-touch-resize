@@ -295,6 +295,18 @@ function installGestureLayer() {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const pointerList = () => [...pointers.values()];
+  // Pointer/touch events on the canvas TARGET the <canvas> element, so they
+  // reach it in the AT_TARGET phase where listeners fire in *registration*
+  // order regardless of the capture flag. LiteGraph binds its handlers on the
+  // same element in its constructor — before our setup() — so a capture-phase
+  // listener on `el` would still run *after* LiteGraph's and lose the race:
+  // the canvas zooms (and, for nodes, body-drag fires) before we can suppress.
+  // Listening on an ANCESTOR in the capture phase fixes the ordering: ancestor
+  // capture provably precedes any AT_TARGET listener. We gate suppression on
+  // the lock so non-gesture interaction (single-finger drag, native zoom on
+  // empty canvas, corner-handle resize) passes straight through to LiteGraph.
+  const captureRoot = window;
+  const onCanvas = (e) => e.target === el || (el.contains?.(e.target) ?? false);
 
   const applyResize = (cmd) => {
     const t = targetsById.get(cmd.targetId);
@@ -311,56 +323,73 @@ function installGestureLayer() {
     canvas.setDirty(true, true);
   };
 
-  el.addEventListener(
+  const suppress = (e) => {
+    e.stopImmediatePropagation();
+    if (e.cancelable) e.preventDefault();
+  };
+
+  captureRoot.addEventListener(
     "pointerdown",
     (e) => {
+      if (!onCanvas(e)) return;
       pointers.set(e.pointerId, { id: e.pointerId, ...localPoint(e) });
       if (pointers.size === 2 && !controller.locked) {
         const targets = resolveTargets(canvas, CONFIG);
         targetsById = new Map(targets.map((t) => [t.id, t]));
         const cmd = controller.onPointersChanged(pointerList(), targets);
-        if (cmd?.type === "lock") e.stopImmediatePropagation(); // suppress native pinch handling
+        // Suppress the second-finger pointerdown so LiteGraph never enters its
+        // pinch-zoom / multitouch path for this gesture.
+        if (cmd?.type === "lock") suppress(e);
       }
     },
     true,
   );
 
-  el.addEventListener(
+  captureRoot.addEventListener(
     "pointermove",
     (e) => {
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { id: e.pointerId, ...localPoint(e) });
       if (!controller.locked) return;
       const cmd = controller.onPointersMoved(pointerList());
-      if (cmd?.type === "resize") {
-        applyResize(cmd);
-        e.stopImmediatePropagation();
-        e.preventDefault();
-      }
+      if (cmd?.type === "resize") applyResize(cmd);
+      // While locked, swallow every move so LiteGraph neither zooms the canvas
+      // nor drags the node body underneath the gesture.
+      suppress(e);
     },
     true,
   );
 
-  // Native canvas zoom is wheel-driven (processMouseWheel → ds.changeScale), and
-  // browsers deliver two-finger pinch-zoom as ctrl+wheel — so suppressing it
-  // during a locked gesture requires intercepting wheel, not just pointer events.
-  el.addEventListener(
+  // Hedges for the native-zoom paths that don't surface as the pointer stream:
+  //   • ctrl+wheel — how browsers deliver trackpad pinch-zoom (processMouseWheel).
+  //   • touch events — some LiteGraph builds drive multitouch pinch off these
+  //     rather than pointer events; touch-action:none stops the browser's own
+  //     page zoom. Both are no-ops unless a gesture is locked.
+  el.style.touchAction = "none";
+  captureRoot.addEventListener(
     "wheel",
     (e) => {
-      if (controller.locked) {
-        e.stopImmediatePropagation();
-        e.preventDefault();
-      }
+      if (controller.locked && onCanvas(e)) suppress(e);
     },
     { capture: true, passive: false },
   );
+  for (const type of ["touchstart", "touchmove", "touchend"]) {
+    captureRoot.addEventListener(
+      type,
+      (e) => {
+        if (controller.locked && onCanvas(e)) suppress(e);
+      },
+      { capture: true, passive: false },
+    );
+  }
 
   const endPointer = (e) => {
+    if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
     controller.onPointerEnded(pointers.size); // release command needs no DOM apply
   };
-  el.addEventListener("pointerup", endPointer, true);
-  el.addEventListener("pointercancel", endPointer, true);
+  captureRoot.addEventListener("pointerup", endPointer, true);
+  captureRoot.addEventListener("pointercancel", endPointer, true);
 
   console.log(`[${EXT_NAME}] gesture layer installed — pinch a selected node to resize`);
 }
