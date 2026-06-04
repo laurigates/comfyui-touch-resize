@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   centroid,
+  cornerHintPath,
   groupScreenRect,
   nodeScreenRect,
   pinchDistance,
@@ -59,6 +60,25 @@ describe("scaledSize", () => {
   });
   it("clamps to the minimum", () => {
     expect(scaledSize([200, 100], 0.1, [120, 60])).toEqual([120, 60]);
+  });
+});
+
+describe("cornerHintPath", () => {
+  it("brackets the bottom-right corner: up then left", () => {
+    const pts = cornerHintPath({ x: 10, y: 20, w: 100, h: 50 }, 8);
+    // corner = (110, 70)
+    expect(pts).toEqual([
+      { x: 110, y: 62 },
+      { x: 110, y: 70 },
+      { x: 102, y: 70 },
+    ]);
+  });
+
+  it("scales the bracket legs with sizePx", () => {
+    const small = cornerHintPath({ x: 0, y: 0, w: 100, h: 100 }, 4);
+    const big = cornerHintPath({ x: 0, y: 0, w: 100, h: 100 }, 40);
+    expect(small[0]).toEqual({ x: 100, y: 96 });
+    expect(big[0]).toEqual({ x: 100, y: 60 });
   });
 });
 

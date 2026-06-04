@@ -32,6 +32,10 @@ const CONFIG = {
   mode: "uniform", // "uniform" (hypot scale) — "aniso" added later
   // LGraphGroup self-clamps size to minWidth=140/minHeight=80; mirror that floor.
   groupMinSize: [140, 80],
+  // Discoverability hint: a faint corner bracket on selected nodes/groups.
+  showHint: true,
+  hintAlpha: 0.35,
+  hintSizePx: 18, // on-screen length; kept ~constant by dividing out ds.scale
 };
 
 // --- Pure helpers (unit-tested) ----------------------------------------- //
@@ -69,6 +73,21 @@ export function nodeScreenRect(node, scale, offset, titleHeight = DEFAULT_TITLE_
  */
 export function scaledSize(startSize, ratio, minSize = [0, 0]) {
   return [Math.max(minSize[0], startSize[0] * ratio), Math.max(minSize[1], startSize[1] * ratio)];
+}
+
+/**
+ * Bottom-right corner-bracket hint for rect {x,y,w,h}, as a 3-point poly-line
+ * (up from the corner, then left). Pure: the caller strokes it. `sizePx` is
+ * the bracket leg length in whatever space the rect is expressed in.
+ */
+export function cornerHintPath(rect, sizePx) {
+  const x = rect.x + rect.w;
+  const y = rect.y + rect.h;
+  return [
+    { x, y: y - sizePx },
+    { x, y },
+    { x: x - sizePx, y },
+  ];
 }
 
 /**
@@ -313,11 +332,48 @@ function installGestureLayer() {
   console.log(`[${EXT_NAME}] gesture layer installed — pinch a selected node to resize`);
 }
 
+// Stroke the corner hints. onDrawForeground runs UNDER the ds transform, so we
+// draw in graph space (item.pos/size directly) and divide the on-screen length
+// by ds.scale so the bracket stays ~constant size as the user zooms.
+function drawHints(ctx, canvas, cfg) {
+  const scale = canvas?.ds?.scale ?? 1;
+  const items = [...selectedNodes(canvas), ...selectedGroups(canvas)];
+  if (!items.length) return;
+  const sizeG = cfg.hintSizePx / scale;
+  ctx.save();
+  ctx.globalAlpha = cfg.hintAlpha;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2 / scale;
+  for (const it of items) {
+    const pts = cornerHintPath({ x: it.pos[0], y: it.pos[1], w: it.size[0], h: it.size[1] }, sizeG);
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Instance-chain onDrawForeground (not a prototype patch) so the overlay is
+// additive and tears down cleanly if the canvas is replaced.
+function installAffordance(canvas, cfg) {
+  if (!canvas || !cfg.showHint) return;
+  const prev = canvas.onDrawForeground;
+  canvas.onDrawForeground = function (ctx, visibleRect) {
+    prev?.call(this, ctx, visibleRect);
+    try {
+      drawHints(ctx, this, cfg);
+    } catch (err) {
+      console.warn(`[${EXT_NAME}] hint draw failed`, err);
+    }
+  };
+}
+
 app.registerExtension({
   name: "comfy.touch-resize",
   async setup() {
     installGestureLayer();
-    // TODO: discoverability — draw a faint corner affordance on selected items.
+    installAffordance(app.canvas, CONFIG);
     // TODO: optional anisotropic mode — independent W/H from the finger vector.
   },
 });
