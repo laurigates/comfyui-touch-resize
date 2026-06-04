@@ -21,21 +21,22 @@ are ~30s. The PNG lands at `docs/hint.png`.
 
 Unlike the modal packs in the family, touch-resize is a **canvas-gesture**
 pack: a two-finger pinch resizes a selected node. There is no dialog to
-screenshot, and the pinch itself can't be shown in a still. The honest,
-statically-screenshottable surfaces are the pack's own canvas-painted
-affordance plus the *outcome* of a resize:
+screenshot, and the pinch itself can't be performed headlessly. So the driver
+composes an honest illustration of the gesture:
 
 1. `Dockerfile` builds on the official Playwright image, clones a pinned
    ComfyUI release, and installs CPU-only torch + ComfyUI's requirements.
 2. `entrypoint.sh` launches ComfyUI headless on `:8188` (`--cpu`), waits for
    `/system_stats`, then runs the capture driver.
-3. `capture.mjs` (Playwright) loads `workflow.json` (two identical KSampler
-   nodes — one default size, one resized larger), **selects both directly**
-   on the canvas (so the pack's `onDrawForeground` corner-hint affordance
-   paints, without triggering the frontend's Vue selection toolbox), forces
-   a redraw, and clips the canvas region spanning both nodes.
-4. The before/after size pair + the real corner brackets read as "pinch a
-   selected node to resize it" without fabricating any UI.
+3. `capture.mjs` (Playwright) loads `workflow.json` (a single KSampler),
+   **selects it directly** on the canvas — so the pack's real
+   `onDrawForeground` corner-hint affordance (the amber bracket) paints,
+   without triggering the frontend's Vue selection toolbox — then **injects a
+   pinch callout** (two fingertip dots + a diverging double-arrow) over the
+   node body and clips the canvas region around the node.
+4. The amber corner bracket is the genuine pack affordance; the pinch callout
+   is a clearly-illustrative documentation overlay (the pack draws no fingers)
+   that shows the two-finger spread. Its accent matches the pack's `hintColor`.
 5. The driver writes to `/out`, which the `just` recipe mounts to `docs/`.
 
 | File | Purpose |
@@ -43,8 +44,8 @@ affordance plus the *outcome* of a resize:
 | `Dockerfile` | Single-stage build (Playwright base + ComfyUI + CPU torch). |
 | `Dockerfile.dockerignore` | Keeps the build context lean. |
 | `entrypoint.sh` | Boots ComfyUI, waits for ready, runs the driver, asserts `$EXPECTED_OUTPUTS` exist. |
-| `capture.mjs` | Playwright driver — selects nodes, paints the affordance, clips the canvas. |
-| `workflow.json` | Two-KSampler graph (default + resized) the driver loads. |
+| `capture.mjs` | Playwright driver — selects the node, paints the affordance, injects the pinch callout, clips the canvas. |
+| `workflow.json` | Single-KSampler graph the driver loads. |
 | `package.json` | Pins the Playwright npm version for the driver. |
 
 ## Pins (bump deliberately)
