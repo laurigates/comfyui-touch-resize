@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  anisoSize,
   centroid,
   cornerHintPath,
   groupScreenRect,
@@ -60,6 +61,40 @@ describe("scaledSize", () => {
   });
   it("clamps to the minimum", () => {
     expect(scaledSize([200, 100], 0.1, [120, 60])).toEqual([120, 60]);
+  });
+});
+
+describe("anisoSize", () => {
+  it("scales each axis independently by its span ratio", () => {
+    // start vector spans (20, 10); current (40, 10) → x doubles, y unchanged.
+    const size = anisoSize([200, 100], [20, 10], [40, 10], [0, 0], 8);
+    expect(size).toEqual([400, 100]);
+  });
+
+  it("shrinks an axis whose span shrinks", () => {
+    const size = anisoSize([200, 100], [40, 40], [20, 40], [0, 0], 8);
+    expect(size).toEqual([100, 100]);
+  });
+
+  it("clamps each axis to minSize", () => {
+    const size = anisoSize([200, 100], [40, 40], [4, 4], [120, 60], 8);
+    expect(size).toEqual([120, 60]);
+  });
+
+  it("falls back to the uniform ratio on a degenerate start axis (span ≤ eps)", () => {
+    // y span starts at 0 (fingers horizontal) → y can't track independently.
+    // start = (20, 0), cur = (40, 0): startLen 20, curLen 40 → uniform 2.0.
+    const size = anisoSize([200, 100], [20, 0], [40, 0], [0, 0], 8);
+    expect(size).toEqual([400, 200]); // x by its own ratio (2), y by uniform (2)
+  });
+
+  it("uses the eps threshold, not strict zero", () => {
+    // y start span = 5 ≤ eps 8 → degenerate → uniform.
+    const size = anisoSize([100, 100], [30, 5], [60, 5], [0, 0], 8);
+    const startLen = Math.hypot(30, 5);
+    const uniform = Math.hypot(60, 5) / startLen;
+    expect(size[0]).toBeCloseTo(100 * (60 / 30));
+    expect(size[1]).toBeCloseTo(100 * uniform);
   });
 });
 

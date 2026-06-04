@@ -29,13 +29,18 @@ const DEFAULT_TITLE_HEIGHT = 30;
 
 // Module config. No in-UI settings for v1 — tweak here and hard-refresh.
 const CONFIG = {
-  mode: "uniform", // "uniform" (hypot scale) — "aniso" added later
+  // "uniform" = hypot scale (default); "aniso" = independent W/H from the
+  // two-finger vector's per-axis spread.
+  mode: "uniform",
   // LGraphGroup self-clamps size to minWidth=140/minHeight=80; mirror that floor.
   groupMinSize: [140, 80],
   // Discoverability hint: a faint corner bracket on selected nodes/groups.
   showHint: true,
   hintAlpha: 0.35,
   hintSizePx: 18, // on-screen length; kept ~constant by dividing out ds.scale
+  // Anisotropic degenerate-axis guard: if the fingers start aligned on an axis
+  // (span ≤ anisoEps px) that axis falls back to the uniform ratio.
+  anisoEps: 8,
 };
 
 // --- Pure helpers (unit-tested) ----------------------------------------- //
@@ -73,6 +78,24 @@ export function nodeScreenRect(node, scale, offset, titleHeight = DEFAULT_TITLE_
  */
 export function scaledSize(startSize, ratio, minSize = [0, 0]) {
   return [Math.max(minSize[0], startSize[0] * ratio), Math.max(minSize[1], startSize[1] * ratio)];
+}
+
+/**
+ * New [w, h] for an anisotropic (independent W/H) pinch. startVec/curVec are
+ * the two-finger vector [dx, dy] = p2 - p1 at lock and now. Each axis scales by
+ * the change in that axis's |span|. If the start span on an axis is degenerate
+ * (≤ eps, fingers aligned there) the axis falls back to the uniform hypot ratio
+ * so it still tracks the gesture instead of dividing by ~0.
+ */
+export function anisoSize(startSize, startVec, curVec, minSize = [0, 0], eps = 8) {
+  const startLen = Math.hypot(startVec[0], startVec[1]) || 1;
+  const uniform = Math.hypot(curVec[0], curVec[1]) / startLen;
+  const axisRatio = (start, cur) =>
+    Math.abs(start) <= eps ? uniform : Math.abs(cur) / Math.abs(start);
+  return [
+    Math.max(minSize[0], startSize[0] * axisRatio(startVec[0], curVec[0])),
+    Math.max(minSize[1], startSize[1] * axisRatio(startVec[1], curVec[1])),
+  ];
 }
 
 /**
@@ -184,10 +207,10 @@ export function resolveTargets(canvas, cfg = CONFIG) {
  * data, returns commands. Never mutates nodes/groups or touches the DOM.
  *
  * @typedef {{id:number,x:number,y:number}} Pointer
- * @param {typeof CONFIG} _cfg reserved for mode selection (see anisotropic mode)
+ * @param {typeof CONFIG} cfg selects uniform vs anisotropic resize (cfg.mode)
  */
-export function createGestureController(_cfg = CONFIG) {
-  // lock = null | { targetId, startDist, startSize:[w,h], minSize:[w,h] }
+export function createGestureController(cfg = CONFIG) {
+  // lock = null | { targetId, startDist, startVec:[dx,dy], startSize:[w,h], minSize:[w,h] }
   let lock = null;
 
   return {
@@ -205,6 +228,7 @@ export function createGestureController(_cfg = CONFIG) {
           lock = {
             targetId: t.id,
             startDist: pinchDistance(p1, p2) || 1,
+            startVec: [p2.x - p1.x, p2.y - p1.y],
             startSize: [t.size[0], t.size[1]],
             minSize: t.minSize ?? [0, 0],
           };
@@ -221,8 +245,14 @@ export function createGestureController(_cfg = CONFIG) {
     onPointersMoved(pointers) {
       if (!lock || pointers.length < 2) return null;
       const [p1, p2] = pointers;
-      const ratio = pinchDistance(p1, p2) / lock.startDist;
-      const size = scaledSize(lock.startSize, ratio, lock.minSize);
+      let size;
+      if (cfg.mode === "aniso") {
+        const curVec = [p2.x - p1.x, p2.y - p1.y];
+        size = anisoSize(lock.startSize, lock.startVec, curVec, lock.minSize, cfg.anisoEps);
+      } else {
+        const ratio = pinchDistance(p1, p2) / lock.startDist;
+        size = scaledSize(lock.startSize, ratio, lock.minSize);
+      }
       return { type: "resize", targetId: lock.targetId, size };
     },
 
@@ -374,6 +404,5 @@ app.registerExtension({
   async setup() {
     installGestureLayer();
     installAffordance(app.canvas, CONFIG);
-    // TODO: optional anisotropic mode — independent W/H from the finger vector.
   },
 });

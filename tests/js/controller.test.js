@@ -150,6 +150,42 @@ describe("createGestureController — kind-agnostic (groups)", () => {
   });
 });
 
+describe("createGestureController — resize (aniso)", () => {
+  it("resizes width and height independently from the finger vector", () => {
+    const c = createGestureController({ mode: "aniso", anisoEps: 8 });
+    // start vector spans (20, 20): fingers diagonal.
+    c.onPointersChanged(
+      [
+        { id: 1, x: 40, y: 40 },
+        { id: 2, x: 60, y: 60 },
+      ],
+      [nodeTarget({ screenRect: rectAt(0, 0, 200, 200) })],
+    );
+    // current vector (40, 20): x span doubled, y span unchanged.
+    const cmd = c.onPointersMoved([
+      { id: 1, x: 30, y: 40 },
+      { id: 2, x: 70, y: 60 },
+    ]);
+    expect(cmd.size).toEqual([400, 100]); // w 200→400, h unchanged
+  });
+
+  it("defaults to uniform scaling when mode is unset", () => {
+    const c = createGestureController({}); // no mode
+    c.onPointersChanged(
+      [
+        { id: 1, x: 40, y: 50 },
+        { id: 2, x: 60, y: 50 },
+      ],
+      [nodeTarget()],
+    );
+    const cmd = c.onPointersMoved([
+      { id: 1, x: 30, y: 50 },
+      { id: 2, x: 70, y: 50 },
+    ]);
+    expect(cmd.size).toEqual([400, 200]); // uniform ratio 2.0 on both axes
+  });
+});
+
 describe("createGestureController — release", () => {
   it("releases the lock when pointers drop below two", () => {
     const c = createGestureController({ mode: "uniform" });
