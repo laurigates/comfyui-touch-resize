@@ -8,6 +8,12 @@ Selection-gated pinch-to-resize for ComfyUI nodes and groups on touch devices.
 > touch-friendly gestures and HTML modals that replace clunky native
 > LiteGraph interactions, additive and non-clobbering.
 
+![Two-finger pinch resizes a selected node](docs/hint.png)
+
+*A two-finger pinch on a selected node resizes it. The amber corner bracket is
+the discoverability hint the pack paints on selected nodes/groups; the
+fingertips + arrow here are an illustration of the gesture.*
+
 ## Install
 
 ```sh

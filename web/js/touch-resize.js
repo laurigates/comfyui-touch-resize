@@ -34,9 +34,12 @@ const CONFIG = {
   mode: "uniform",
   // LGraphGroup self-clamps size to minWidth=140/minHeight=80; mirror that floor.
   groupMinSize: [140, 80],
-  // Discoverability hint: a faint corner bracket on selected nodes/groups.
+  // Discoverability hint: a corner bracket on selected nodes/groups. A vivid
+  // accent (not white) so the grab affordance stands out against both the dark
+  // node body and the white selection outline. Tune hintColor/hintAlpha here.
   showHint: true,
-  hintAlpha: 0.35,
+  hintColor: "#ffb02e",
+  hintAlpha: 0.9,
   hintSizePx: 18, // on-screen length; kept ~constant by dividing out ds.scale
   // Anisotropic degenerate-axis guard: if the fingers start aligned on an axis
   // (span ≤ anisoEps px) that axis falls back to the uniform ratio.
@@ -372,8 +375,8 @@ function drawHints(ctx, canvas, cfg) {
   const sizeG = cfg.hintSizePx / scale;
   ctx.save();
   ctx.globalAlpha = cfg.hintAlpha;
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 2 / scale;
+  ctx.strokeStyle = cfg.hintColor;
+  ctx.lineWidth = 2.5 / scale;
   for (const it of items) {
     const pts = cornerHintPath({ x: it.pos[0], y: it.pos[1], w: it.size[0], h: it.size[1] }, sizeG);
     ctx.beginPath();

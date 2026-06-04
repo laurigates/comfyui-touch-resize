@@ -32,3 +32,13 @@ test:
 # Lint + test in one shot.
 [group: "quality"]
 check: lint test
+
+##########
+# Documentation artifacts
+##########
+
+# Regenerate docs/hint.png (the corner-hint affordance) via the screenshot generator.
+[group: "docs"]
+screenshots:
+    docker build -f screenshots/Dockerfile -t comfyui-touch-resize-screenshots .
+    docker run --rm -v "$(pwd)/docs:/out" comfyui-touch-resize-screenshots

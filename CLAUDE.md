@@ -70,8 +70,10 @@ under minification / forks): a node has `computeSize()`, a group has
 `pos`+`size`+string `title` and no `computeSize`, a reroute has no `size`.
 
 `CONFIG` (module constant near the top) is the only knob — no in-UI settings for
-v1. `mode` (`"uniform"`|`"aniso"`), `groupMinSize`, `showHint`/`hintAlpha`/
-`hintSizePx`, `anisoEps`.
+v1. `mode` (`"uniform"`|`"aniso"`), `groupMinSize`, `showHint`/`hintColor`/
+`hintAlpha`/`hintSizePx`, `anisoEps`. `hintColor` is a vivid accent (default
+`#ffb02e`) rather than white so the grab affordance stands out against both the
+node body and the white selection outline.
 
 ## Verified frontend API (from the sourcemap)
 
