@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.2...comfyui-touch-resize-v0.1.3) (2026-06-05)
+
+
+### Bug Fixes
+
+* **resize:** make the pinch-resize gesture reliably exitable ([#9](https://github.com/laurigates/comfyui-touch-resize/issues/9)) ([21ee53b](https://github.com/laurigates/comfyui-touch-resize/commit/21ee53b7c3570fcf3d4985792aec22d5bcd45b1c))
+
 ## [0.1.2](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.1...comfyui-touch-resize-v0.1.2) (2026-06-04)
 
 
