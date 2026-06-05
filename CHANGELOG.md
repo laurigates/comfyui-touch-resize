@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.3...comfyui-touch-resize-v0.1.4) (2026-06-05)
+
+
+### Bug Fixes
+
+* **resize:** hand pointers back to LiteGraph so the canvas isn't stuck after a resize ([#11](https://github.com/laurigates/comfyui-touch-resize/issues/11)) ([bc44a72](https://github.com/laurigates/comfyui-touch-resize/commit/bc44a727a7ee640ef2caeaf4ab35dba1d500c277))
+
 ## [0.1.3](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.2...comfyui-touch-resize-v0.1.3) (2026-06-05)
 
 
