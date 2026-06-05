@@ -213,7 +213,8 @@ export function resolveTargets(canvas, cfg = CONFIG) {
  * @param {typeof CONFIG} cfg selects uniform vs anisotropic resize (cfg.mode)
  */
 export function createGestureController(cfg = CONFIG) {
-  // lock = null | { targetId, startDist, startVec:[dx,dy], startSize:[w,h], minSize:[w,h] }
+  // lock = null | { targetId, pointerIds:[id,id], startDist, startVec:[dx,dy],
+  //                 startSize:[w,h], minSize:[w,h] }
   let lock = null;
 
   return {
@@ -230,6 +231,10 @@ export function createGestureController(cfg = CONFIG) {
         if (pointInRect(c.x, c.y, t.screenRect)) {
           lock = {
             targetId: t.id,
+            // Remember exactly which two pointers own the gesture so lifting
+            // either one ends it, and a stray third touch can never keep it
+            // alive (see onPointerEnded).
+            pointerIds: [p1.id, p2.id],
             startDist: pinchDistance(p1, p2) || 1,
             startVec: [p2.x - p1.x, p2.y - p1.y],
             startSize: [t.size[0], t.size[1]],
@@ -260,11 +265,31 @@ export function createGestureController(cfg = CONFIG) {
     },
 
     /**
-     * @param {number} pointerCount remaining active pointers
+     * End the gesture when one of its two pointers lifts. Releasing on the
+     * *first* gesture pointer (rather than waiting for the active count to fall
+     * below two) means a stray extra touch can never strand the lock. A
+     * pointer that was not part of the gesture is ignored. Call with no id
+     * (or a null id) to force-release from a non-pointer path (Escape, blur,
+     * touch fallback) — see reset().
+     * @param {number|null} [pointerId] the pointer that just ended
      * @returns {{type:"release",targetId:string}|null}
      */
-    onPointerEnded(pointerCount) {
-      if (pointerCount >= 2 || !lock) return null;
+    onPointerEnded(pointerId) {
+      if (!lock) return null;
+      if (pointerId != null && !lock.pointerIds.includes(pointerId)) return null;
+      const { targetId } = lock;
+      lock = null;
+      return { type: "release", targetId };
+    },
+
+    /**
+     * Unconditionally drop any active lock. Escape hatch for the adapter's
+     * non-pointer release paths (Escape key, window blur, touch-stream
+     * fallback) so the resize state can never get stuck.
+     * @returns {{type:"release",targetId:string}|null}
+     */
+    reset() {
+      if (!lock) return null;
       const { targetId } = lock;
       lock = null;
       return { type: "release", targetId };
@@ -360,11 +385,23 @@ function installGestureLayer() {
     true,
   );
 
+  // Force-release: drop the lock and forget every tracked pointer. The escape
+  // hatch behind every non-pointer exit path (Escape, blur, touch fallback) so
+  // a missed terminal event can never strand the resize state. The release
+  // command needs no DOM apply — clearing the lock un-gates suppression.
+  const forceRelease = () => {
+    pointers.clear();
+    controller.reset();
+  };
+
   // Hedges for the native-zoom paths that don't surface as the pointer stream:
   //   • ctrl+wheel — how browsers deliver trackpad pinch-zoom (processMouseWheel).
-  //   • touch events — some LiteGraph builds drive multitouch pinch off these
+  //   • touchstart/move — some LiteGraph builds drive multitouch pinch off these
   //     rather than pointer events; touch-action:none stops the browser's own
-  //     page zoom. Both are no-ops unless a gesture is locked.
+  //     page zoom. No-ops unless a gesture is locked.
+  // We deliberately do NOT suppress touchend/touchcancel: there is no native
+  // zoom to stop on a finger lift, and swallowing the terminal touch can starve
+  // the release path. Instead we use them as a fallback exit (below).
   el.style.touchAction = "none";
   captureRoot.addEventListener(
     "wheel",
@@ -373,7 +410,7 @@ function installGestureLayer() {
     },
     { capture: true, passive: false },
   );
-  for (const type of ["touchstart", "touchmove", "touchend"]) {
+  for (const type of ["touchstart", "touchmove"]) {
     captureRoot.addEventListener(
       type,
       (e) => {
@@ -382,14 +419,45 @@ function installGestureLayer() {
       { capture: true, passive: false },
     );
   }
+  // Touch-stream fallback exit. On builds that derive pointer events from touch,
+  // preventDefault-ing the move stream can drop the gesture pointers' terminal
+  // pointerup/pointercancel — leaving the lock stuck. `touches` lists the
+  // fingers STILL down (the lifted one moved to `changedTouches`), so once it
+  // falls below two the pinch is over: release regardless of the pointer stream.
+  const onTouchEnd = (e) => {
+    if (controller.locked && (e.touches?.length ?? 0) < 2) forceRelease();
+  };
+  captureRoot.addEventListener("touchend", onTouchEnd, true);
+  captureRoot.addEventListener("touchcancel", onTouchEnd, true);
 
   const endPointer = (e) => {
-    if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
-    controller.onPointerEnded(pointers.size); // release command needs no DOM apply
+    // Let the controller decide: it releases on the first *gesture* pointer to
+    // lift (ignoring strays). Passing the id even for untracked pointers is
+    // safe and keeps the global listener honest.
+    controller.onPointerEnded(e.pointerId);
   };
   captureRoot.addEventListener("pointerup", endPointer, true);
-  captureRoot.addEventListener("pointercancel", endPointer, true);
+  // A pointercancel means the browser claimed the interaction — tear the whole
+  // gesture down, not just the one pointer, so nothing is left half-locked.
+  captureRoot.addEventListener(
+    "pointercancel",
+    (e) => {
+      pointers.delete(e.pointerId);
+      if (controller.locked) forceRelease();
+    },
+    true,
+  );
+
+  // Guaranteed manual exits, independent of the touch/pointer stream entirely:
+  // Escape ends a stuck resize, and losing the window (app switch, alert) drops
+  // it so you never return to a half-locked canvas.
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && controller.locked) forceRelease();
+  });
+  window.addEventListener("blur", () => {
+    if (controller.locked) forceRelease();
+  });
 
   console.log(`[${EXT_NAME}] gesture layer installed — pinch a selected node to resize`);
 }

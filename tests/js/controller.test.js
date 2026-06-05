@@ -187,8 +187,7 @@ describe("createGestureController — resize (aniso)", () => {
 });
 
 describe("createGestureController — release", () => {
-  it("releases the lock when pointers drop below two", () => {
-    const c = createGestureController({ mode: "uniform" });
+  const lockTwo = (c) =>
     c.onPointersChanged(
       [
         { id: 1, x: 40, y: 50 },
@@ -196,12 +195,45 @@ describe("createGestureController — release", () => {
       ],
       [nodeTarget()],
     );
+
+  it("releases when one of the two gesture pointers lifts", () => {
+    const c = createGestureController({ mode: "uniform" });
+    lockTwo(c);
     const cmd = c.onPointerEnded(1);
     expect(cmd).toEqual({ type: "release", targetId: "node:1" });
     expect(c.locked).toBe(false);
   });
 
-  it("keeps the lock while two pointers remain", () => {
+  it("releases on the other gesture pointer too", () => {
+    const c = createGestureController({ mode: "uniform" });
+    lockTwo(c);
+    expect(c.onPointerEnded(2)).toEqual({ type: "release", targetId: "node:1" });
+    expect(c.locked).toBe(false);
+  });
+
+  it("ignores a stray pointer that was not part of the gesture", () => {
+    const c = createGestureController({ mode: "uniform" });
+    lockTwo(c);
+    // A third finger touched down and lifts again — the pinch must survive.
+    expect(c.onPointerEnded(99)).toBe(null);
+    expect(c.locked).toBe(true);
+  });
+
+  it("force-releases on a null id (non-pointer exit paths)", () => {
+    const c = createGestureController({ mode: "uniform" });
+    lockTwo(c);
+    expect(c.onPointerEnded(null)).toEqual({ type: "release", targetId: "node:1" });
+    expect(c.locked).toBe(false);
+  });
+
+  it("returns null when releasing without a lock", () => {
+    const c = createGestureController({ mode: "uniform" });
+    expect(c.onPointerEnded(1)).toBe(null);
+  });
+});
+
+describe("createGestureController — reset", () => {
+  it("drops an active lock and reports the released target", () => {
     const c = createGestureController({ mode: "uniform" });
     c.onPointersChanged(
       [
@@ -210,12 +242,12 @@ describe("createGestureController — release", () => {
       ],
       [nodeTarget()],
     );
-    expect(c.onPointerEnded(2)).toBe(null);
-    expect(c.locked).toBe(true);
+    expect(c.reset()).toEqual({ type: "release", targetId: "node:1" });
+    expect(c.locked).toBe(false);
   });
 
-  it("returns null when releasing without a lock", () => {
+  it("is a no-op when nothing is locked", () => {
     const c = createGestureController({ mode: "uniform" });
-    expect(c.onPointerEnded(0)).toBe(null);
+    expect(c.reset()).toBe(null);
   });
 });

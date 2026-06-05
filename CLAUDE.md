@@ -57,7 +57,10 @@ browser (no jsdom — by design, matching the other packs in the vein):
   takes plain pointer/target data; returns `{type:"lock"|"resize"|"release"}`
   commands. Never touches the DOM or `app`. This is where the lock / scale /
   clamp / release decisions live, and it is exhaustively unit-tested
-  (`tests/js/controller.test.js`).
+  (`tests/js/controller.test.js`). The lock records its two **pointer ids**, so
+  `onPointerEnded(id)` releases the moment *either* gesture finger lifts (a stray
+  third touch can't strand it), and `reset()` is an unconditional force-release
+  for the adapter's non-pointer exits.
 - **`installGestureLayer()`** — thin DOM adapter: pointer/wheel events → data,
   controller commands → `node.size`/`group.size` mutation. Per gesture it calls
   `resolveTargets()` and keeps a `targetId → Target` map to apply commands.
@@ -92,6 +95,7 @@ Checked against
 | `LGraphGroup.id` | defaults to `-1`, not guaranteed unique → target key falls back to selection index. |
 | Native zoom | **wheel-driven** (`processMouseWheel` → `ds.changeScale`; browsers send pinch-zoom as ctrl+wheel). The pack therefore intercepts `wheel` (capture, `passive:false`) while a gesture is locked, in addition to `stopImmediatePropagation` on pointer events. |
 | Listener phase (critical) | LiteGraph binds its pointer/wheel handlers on the **canvas element** in its constructor — *before* our `setup()`. Those events TARGET that element, so in the `AT_TARGET` phase listeners fire in **registration order, capture flag ignored** → a capture listener on `el` still runs *after* LiteGraph and loses the race. The suppression layer therefore binds on an **ancestor (`window`) in the capture phase**, which provably precedes any `AT_TARGET` listener. Without this the canvas zooms *and* the node body-drags while we resize (groups felt fine only because they drag by their title bar, not their body). |
+| Gesture exit (don't strand the lock) | Suppressing the move stream (`preventDefault` + `touch-action:none`) can make a build that derives pointer events from touch **drop the gesture pointers' terminal `pointerup`/`pointercancel`** — leaving the lock stuck with suppression eating every wheel/touch, so the user can't recover. Defenses, in layers: (1) the lock owns its two pointer ids → release on the *first* to lift; (2) **don't** suppress `touchend`/`touchcancel` — instead use them as a fallback exit (`touches.length < 2` ⇒ release); (3) `pointercancel` force-releases the whole gesture; (4) **Escape** and window **`blur`** are guaranteed manual exits independent of the touch/pointer stream. |
 
 ## Browser smoke matrix (manual)
 
@@ -108,6 +112,8 @@ Unit tests cover the pure logic; these must be verified live (devtools console
 | 6 | Corner hint | faint bracket on selected node/group; stays ~constant size across zoom |
 | 7 | `CONFIG.mode = "aniso"` | horizontal-only / vertical-only pinch changes W or H independently |
 | 8 | Endpoint reachable | the `curl` check above returns `200` |
+| 9 | Exit the resize | lift either finger → gesture ends immediately; native zoom/pan work again right after |
+| 10 | Stuck-state recovery | if a resize ever sticks, **Escape** or switching apps (window blur) drops it |
 
 **Open items still needing a real device** (sourcemap can't settle these):
 
@@ -116,7 +122,11 @@ Unit tests cover the pure logic; these must be verified live (devtools console
   earlier-registered handlers won the `AT_TARGET` race and the canvas zoomed
   (and nodes body-dragged) *while* resizing. The suppression layer now binds on
   `window` in the capture phase (see "Listener phase" above), plus a
-  `touchstart/move/end` hedge and `touch-action:none`. Re-verify matrix #1–#3.
+  `touchstart/move` hedge and `touch-action:none`. Re-verify matrix #1–#3.
+- **Gesture exit (risk #6):** the same suppression could strand the lock when a
+  build drops the gesture pointers' terminal events — fixed with id-based
+  release + a touchend/touchcancel fallback + Escape/blur escape hatches (see
+  the "Gesture exit" row above). Re-verify matrix #9–#10 on a real device.
 - **Anisotropic feel (risk #5):** finger rotation while spreading can feel
   unpredictable — validate on-device before flipping `mode` on by default.
 - **Hint coordinate space (risk #4):** current choice is constant-screen-size
