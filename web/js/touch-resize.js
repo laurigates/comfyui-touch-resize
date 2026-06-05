@@ -314,6 +314,7 @@ function installGestureLayer() {
   const controller = createGestureController(CONFIG);
   const pointers = new Map(); // pointerId -> { id, x, y } in canvas-element-local space
   let targetsById = new Map(); // Target.id -> Target (rebuilt per gesture)
+  let gestureIds = []; // the pointer ids that locked the active gesture
 
   const localPoint = (e) => {
     const r = el.getBoundingClientRect();
@@ -363,8 +364,12 @@ function installGestureLayer() {
         targetsById = new Map(targets.map((t) => [t.id, t]));
         const cmd = controller.onPointersChanged(pointerList(), targets);
         // Suppress the second-finger pointerdown so LiteGraph never enters its
-        // pinch-zoom / multitouch path for this gesture.
-        if (cmd?.type === "lock") suppress(e);
+        // pinch-zoom / multitouch path for this gesture. Remember the gesture's
+        // pointer ids so we can hand them back to LiteGraph on release.
+        if (cmd?.type === "lock") {
+          gestureIds = pointerList().map((p) => p.id);
+          suppress(e);
+        }
       }
     },
     true,
@@ -385,13 +390,38 @@ function installGestureLayer() {
     true,
   );
 
-  // Force-release: drop the lock and forget every tracked pointer. The escape
-  // hatch behind every non-pointer exit path (Escape, blur, touch fallback) so
-  // a missed terminal event can never strand the resize state. The release
-  // command needs no DOM apply — clearing the lock un-gates suppression.
+  // Hand the gesture's pointers back to LiteGraph so it tears down any drag/
+  // pan/pinch it began on the FIRST finger — whose pointerdown reached it before
+  // the second finger locked the gesture, after which we starved its event
+  // stream. Left mid-transaction, LiteGraph stays "stuck in two-finger mode"
+  // after a resize: the canvas won't pan and a tap won't deselect, until a
+  // window blur (app switch) resets it. A pointercancel is exactly the signal a
+  // blur sends, so we replay it on release to get the same clean recovery,
+  // automatically. Additive + defensive: a no-op if PointerEvent can't be
+  // constructed; our own listeners ignore it (isTrusted === false) so the
+  // synthetic event can't disturb the gesture's own state.
+  const cancelNativePointerState = () => {
+    try {
+      for (const id of gestureIds) {
+        el.dispatchEvent(
+          new PointerEvent("pointercancel", { pointerId: id, bubbles: true, cancelable: true }),
+        );
+      }
+    } catch {
+      /* PointerEvent unavailable here — native corner-handle resize still works. */
+    }
+    gestureIds = [];
+  };
+
+  // Force-release: drop the lock, forget every tracked pointer, and clean up
+  // LiteGraph's pointer state. The escape hatch behind every non-pointer exit
+  // path (Escape, blur, touch fallback) so a missed terminal event can never
+  // strand the resize state. We only touch LiteGraph when a lock was actually
+  // held (reset returns a release) so idle Escape/blur stay no-ops.
   const forceRelease = () => {
+    const released = controller.reset()?.type === "release";
     pointers.clear();
-    controller.reset();
+    if (released) cancelNativePointerState();
   };
 
   // Hedges for the native-zoom paths that don't surface as the pointer stream:
@@ -431,11 +461,16 @@ function installGestureLayer() {
   captureRoot.addEventListener("touchcancel", onTouchEnd, true);
 
   const endPointer = (e) => {
+    if (!e.isTrusted) return; // ignore the synthetic cancels we dispatch on release
     pointers.delete(e.pointerId);
     // Let the controller decide: it releases on the first *gesture* pointer to
     // lift (ignoring strays). Passing the id even for untracked pointers is
     // safe and keeps the global listener honest.
-    controller.onPointerEnded(e.pointerId);
+    const cmd = controller.onPointerEnded(e.pointerId);
+    if (cmd?.type === "release") {
+      pointers.clear();
+      cancelNativePointerState();
+    }
   };
   captureRoot.addEventListener("pointerup", endPointer, true);
   // A pointercancel means the browser claimed the interaction — tear the whole
@@ -443,6 +478,7 @@ function installGestureLayer() {
   captureRoot.addEventListener(
     "pointercancel",
     (e) => {
+      if (!e.isTrusted) return; // our own release-time cancels re-enter here
       pointers.delete(e.pointerId);
       if (controller.locked) forceRelease();
     },

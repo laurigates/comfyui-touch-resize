@@ -63,7 +63,10 @@ browser (no jsdom — by design, matching the other packs in the vein):
   for the adapter's non-pointer exits.
 - **`installGestureLayer()`** — thin DOM adapter: pointer/wheel events → data,
   controller commands → `node.size`/`group.size` mutation. Per gesture it calls
-  `resolveTargets()` and keeps a `targetId → Target` map to apply commands.
+  `resolveTargets()` and keeps a `targetId → Target` map to apply commands. On
+  release it **hands the gesture's pointers back to LiteGraph** with a synthetic
+  `pointercancel` so LiteGraph clears the drag it began on the first finger (see
+  the "Hand the pointer back" row in the API table).
 - **`installAffordance(canvas, cfg)`** — instance-chains `onDrawForeground` to
   stroke the corner hint (additive; the previous handler still runs).
 
@@ -96,6 +99,7 @@ Checked against
 | Native zoom | **wheel-driven** (`processMouseWheel` → `ds.changeScale`; browsers send pinch-zoom as ctrl+wheel). The pack therefore intercepts `wheel` (capture, `passive:false`) while a gesture is locked, in addition to `stopImmediatePropagation` on pointer events. |
 | Listener phase (critical) | LiteGraph binds its pointer/wheel handlers on the **canvas element** in its constructor — *before* our `setup()`. Those events TARGET that element, so in the `AT_TARGET` phase listeners fire in **registration order, capture flag ignored** → a capture listener on `el` still runs *after* LiteGraph and loses the race. The suppression layer therefore binds on an **ancestor (`window`) in the capture phase**, which provably precedes any `AT_TARGET` listener. Without this the canvas zooms *and* the node body-drags while we resize (groups felt fine only because they drag by their title bar, not their body). |
 | Gesture exit (don't strand the lock) | Suppressing the move stream (`preventDefault` + `touch-action:none`) can make a build that derives pointer events from touch **drop the gesture pointers' terminal `pointerup`/`pointercancel`** — leaving the lock stuck with suppression eating every wheel/touch, so the user can't recover. Defenses, in layers: (1) the lock owns its two pointer ids → release on the *first* to lift; (2) **don't** suppress `touchend`/`touchcancel` — instead use them as a fallback exit (`touches.length < 2` ⇒ release); (3) `pointercancel` force-releases the whole gesture; (4) **Escape** and window **`blur`** are guaranteed manual exits independent of the touch/pointer stream. |
+| Hand the pointer back to LiteGraph on release (critical) | The FIRST finger's `pointerdown` reaches LiteGraph *before* the second finger locks the gesture, so LiteGraph starts a drag/pan; we then starve its event stream. When our resize ends, LiteGraph is left mid-transaction with a pointer it still thinks is down → **"stuck in two-finger mode": the canvas won't pan and a tap won't deselect** until a window `blur` (app switch) resets it. Fix: on *every* release the adapter **dispatches a synthetic `pointercancel`** (`isTrusted:false`) to the canvas for the gesture's pointer ids — the exact signal a blur sends — so LiteGraph tears down its own drag state automatically. Our listeners ignore non-trusted events so the synthetic cancel can't perturb the gesture. Additive: a no-op if `PointerEvent` can't be constructed. |
 
 ## Browser smoke matrix (manual)
 
@@ -114,6 +118,7 @@ Unit tests cover the pure logic; these must be verified live (devtools console
 | 8 | Endpoint reachable | the `curl` check above returns `200` |
 | 9 | Exit the resize | lift either finger → gesture ends immediately; native zoom/pan work again right after |
 | 10 | Stuck-state recovery | if a resize ever sticks, **Escape** or switching apps (window blur) drops it |
+| 11 | Post-resize canvas | right after a resize: panning, single-tap deselect, and node-drag all work without an app-switch (LiteGraph drag state was handed back) |
 
 **Open items still needing a real device** (sourcemap can't settle these):
 
@@ -127,6 +132,12 @@ Unit tests cover the pure logic; these must be verified live (devtools console
   build drops the gesture pointers' terminal events — fixed with id-based
   release + a touchend/touchcancel fallback + Escape/blur escape hatches (see
   the "Gesture exit" row above). Re-verify matrix #9–#10 on a real device.
+- **Post-resize LiteGraph drag state (risk #7):** the first finger's down
+  reaches LiteGraph before the lock, so after a resize the canvas got "stuck in
+  two-finger mode" (no pan / no tap-deselect) until an app-switch. Fixed by
+  dispatching a synthetic `pointercancel` to the canvas on release (see "Hand
+  the pointer back" above). Re-verify matrix #11 on a real device — and confirm
+  the synthetic cancel doesn't deselect or drop the corner hint.
 - **Anisotropic feel (risk #5):** finger rotation while spreading can feel
   unpredictable — validate on-device before flipping `mode` on by default.
 - **Hint coordinate space (risk #4):** current choice is constant-screen-size
