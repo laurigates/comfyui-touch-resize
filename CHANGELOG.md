@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.4...comfyui-touch-resize-v0.1.5) (2026-06-06)
+
+
+### Features
+
+* **build:** migrate to TypeScript + bun build ([#14](https://github.com/laurigates/comfyui-touch-resize/issues/14)) ([02ddfa5](https://github.com/laurigates/comfyui-touch-resize/commit/02ddfa51d85a26f4e8e811711563f2d1260c27f3))
+
 ## [0.1.4](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.3...comfyui-touch-resize-v0.1.4) (2026-06-05)
 
 
