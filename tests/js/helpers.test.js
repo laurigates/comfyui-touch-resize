@@ -11,7 +11,7 @@ import {
   scaledSize,
   selectedGroups,
   selectedNodes,
-} from "../../web/js/touch-resize.js";
+} from "../../src/index.ts";
 
 // Pure geometry/selection helpers. Importing the module also confirms the
 // registerExtension wiring loads cleanly under the node-environment harness.

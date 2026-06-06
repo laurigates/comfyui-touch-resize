@@ -1,6 +1,14 @@
 # CLAUDE.md
 
-Frontend-only ComfyUI custom-node pack in the canvas-gesture vein. `__init__.py` is a loader stub; the whole extension lives in `web/js/`.
+Frontend-only ComfyUI custom-node pack in the canvas-gesture vein. `__init__.py`
+is a loader stub; the extension is authored in TypeScript (`src/index.ts`) and
+compiled to browser ESM via `bun build`, emitted to `web/dist/` (see ADR-0001).
+
+## Architecture Decisions
+
+| ID | Title | Domain |
+|----|-------|--------|
+| [ADR-0001](docs/blueprint/adrs/0001-adopt-typescript-bun-build.md) | Adopt TypeScript + bun build (supersedes the implicit no-bundler / single-file-JS decisions) | build-tooling |
 
 ## The pattern ("the vein")
 
@@ -10,18 +18,23 @@ A mobile-first ComfyUI usability pack in the *gesture* vein: instead of intercep
 
 | Path | Purpose |
 |------|---------|
-| `__init__.py` | Loader stub. Empty `NODE_CLASS_MAPPINGS`; exports `WEB_DIRECTORY = "./web"`. |
-| `web/js/touch-resize.js` | The extension: canvas pointer layer + pure geometry helpers. |
-| `pyproject.toml` | Comfy Registry metadata. `PublisherId` + `version` are the fields you touch. |
-| `.github/workflows/` | `ci.yml` (ruff/biome/pytest/vitest/gitleaks), `publish.yml` (auto-publish on version bump), `release-please.yml`. |
-| `tests/` | pytest backend suite. `tests/js/` Vitest suite for pure JS helpers. |
-| `justfile` | `lint`, `format`, `test`, `check` recipes — the local CI gate. |
+| `__init__.py` | Loader stub. Empty `NODE_CLASS_MAPPINGS`; exports `WEB_DIRECTORY = "./web/dist"`. |
+| `src/index.ts` | The extension — TypeScript source (port of the former single-file JS): canvas pointer layer + pure geometry helpers + the pure reducer. Compiled to `web/dist/index.js`. |
+| `src/comfyui-shims.d.ts` | Types the `/scripts/app.js` runtime import (see ADR-0001 type-seam notes). |
+| `web/dist/` | **Generated** — `bun build` output (`index.js`). Git-ignored; force-shipped to the registry via `[tool.comfy] includes`. Do not edit by hand. |
+| `tsconfig.json` | TypeScript config — strict, `tsc --noEmit` type gate, `paths` shim. |
+| `knip.json` | Dead-code / unused-dependency check config. |
+| `pyproject.toml` | Comfy Registry metadata. `PublisherId` + `version` are the fields you touch. `[tool.comfy] includes = ["web/dist"]` force-ships the built artifact. |
+| `package.json` | Dev toolchain — `bun build`, `tsc`, Vitest, Biome, knip. |
+| `.github/workflows/` | `ci.yml` (ruff/biome/typecheck+build/pytest/vitest/gitleaks), `publish.yml` (builds, then auto-publishes on version bump), `release-please.yml`. |
+| `tests/` | pytest stub suite. `tests/js/` Vitest suite for the pure helpers + reducer in `src/index.ts`. |
+| `justfile` | `lint`, `format`, `typecheck`, `build`, `knip`, `test`, `check` recipes — the local CI gate. |
 
 ## Hard rules
 
-- **Pack directory name is part of the URL.** `web/js/touch-resize.js` is
-  served at `/extensions/comfyui-touch-resize/js/touch-resize.js`. Renaming the pack dir
-  breaks every fetch. If unavoidable, sync `EXT_NAME` in the JS.
+- **Pack directory name is part of the URL.** The built `web/dist/index.js` is
+  served at `/extensions/comfyui-touch-resize/index.js`. Renaming the pack dir
+  breaks every fetch. If unavoidable, sync `EXT_NAME` in `src/index.ts`.
 - **No Python dependencies. The pack is frontend-only; a feature genuinely needing Python belongs in a separate companion pack.**
 - **Additive only.** Never clobber an existing tooltip/control; fall back to
   the native widget when there's no match. Never fabricate data.
@@ -31,23 +44,35 @@ A mobile-first ComfyUI usability pack in the *gesture* vein: instead of intercep
 
 ```sh
 uv sync --group dev          # ruff, pytest, pre-commit
-npm install --no-audit --no-fund   # Vitest (dev-only; nothing ships from node_modules)
+bun install                  # TS toolchain (typescript, types, vitest, biome, knip)
 pre-commit install
-just check                   # lint + test — the local CI gate
+just check                   # lint + typecheck + build + knip + test — the local CI gate
 ```
 
-Iterating on JS/CSS/JSON needs **no ComfyUI restart** — hard-refresh the tab.
+The served file is the built `web/dist/index.js` (`web/dist/` is git-ignored
+and generated). After editing `src/index.ts` you must **`bun run build`** before
+hard-refreshing the tab. No ComfyUI restart is needed — only a rebuild + refresh.
 
+### Gates before commit
+
+```sh
+bun run typecheck   # tsc --noEmit
+bun run build       # emit web/dist/index.js
+bunx biome check .  # lint + format
+bun run knip        # dead-code / unused-dep
+bun run test        # Vitest (pure helpers + reducer)
+uv run pytest -v    # Python loader-stub smoke tests
+```
 
 ### Endpoint reachability check
 
 ```sh
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8188/extensions/comfyui-touch-resize/js/touch-resize.js
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8188/extensions/comfyui-touch-resize/index.js
 ```
 
 ## Architecture: pure controller + thin adapter
 
-`web/js/touch-resize.js` is split so the gesture logic is testable without a
+`src/index.ts` is split so the gesture logic is testable without a
 browser (no jsdom — by design, matching the other packs in the vein):
 
 - **Pure helpers** (exported, unit-tested): `pinchDistance`, `centroid`,

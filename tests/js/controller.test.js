@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createGestureController } from "../../web/js/touch-resize.js";
+import { createGestureController } from "../../src/index.ts";
 
 // The pure gesture reducer. No DOM, no app — just data in, commands out.
 

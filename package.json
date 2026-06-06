@@ -1,13 +1,21 @@
 {
-  "name": "comfyui-touch-resize-dev",
+  "name": "comfyui-touch-resize",
   "private": true,
   "type": "module",
-  "description": "Dev-only test harness for comfyui-touch-resize. Nothing here ships to users.",
+  "description": "Selection-gated pinch-to-resize for ComfyUI nodes and groups on touch devices. TypeScript source in src/, built to web/dist/ via bun build. See ADR-0001.",
   "scripts": {
+    "build": "bun build ./src/index.ts --target browser --format esm --outdir web/dist --external '/scripts/*'",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "biome check",
+    "knip": "knip"
   },
   "devDependencies": {
-    "vitest": "^4.1.7"
+    "typescript": "^5.7.0",
+    "@comfyorg/comfyui-frontend-types": "^1.43.0",
+    "@biomejs/biome": "^2.4.15",
+    "vitest": "^4.1.7",
+    "knip": "^5.0.0"
   }
 }

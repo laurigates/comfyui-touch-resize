@@ -4,7 +4,7 @@ import __init__ as pack
 
 
 def test_web_directory_exported():
-    assert pack.WEB_DIRECTORY == "./web"
+    assert pack.WEB_DIRECTORY == "./web/dist"
 
 
 def test_node_mappings_exported():
