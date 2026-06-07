@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.5...comfyui-touch-resize-v0.1.6) (2026-06-07)
+
+
+### Bug Fixes
+
+* **ci:** set skip_checkout so the built web/dist reaches the registry ([#16](https://github.com/laurigates/comfyui-touch-resize/issues/16)) ([e5b32e3](https://github.com/laurigates/comfyui-touch-resize/commit/e5b32e31e56c5ae89531d6651c317f79ddba074a))
+
 ## [0.1.5](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.4...comfyui-touch-resize-v0.1.5) (2026-06-06)
 
 
