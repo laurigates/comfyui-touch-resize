@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.6...comfyui-touch-resize-v0.1.7) (2026-06-08)
+
+
+### Bug Fixes
+
+* add Comfy Registry icon/banner and publish on release event ([#20](https://github.com/laurigates/comfyui-touch-resize/issues/20)) ([141d52a](https://github.com/laurigates/comfyui-touch-resize/commit/141d52a3c6b1719d37ce7248e4b65cfef4a3dd25))
+
 ## [0.1.6](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.5...comfyui-touch-resize-v0.1.6) (2026-06-07)
 
 
