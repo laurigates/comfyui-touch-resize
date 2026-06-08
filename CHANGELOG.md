@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.7...comfyui-touch-resize-v0.1.8) (2026-06-08)
+
+
+### Bug Fixes
+
+* ship web/dist in registry tarball (pin publish-node-action skip_checkout) ([#23](https://github.com/laurigates/comfyui-touch-resize/issues/23)) ([1be16fc](https://github.com/laurigates/comfyui-touch-resize/commit/1be16fc4c07e2504564887c75d9882b72a0fbe2b))
+
 ## [0.1.7](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.6...comfyui-touch-resize-v0.1.7) (2026-06-08)
 
 
