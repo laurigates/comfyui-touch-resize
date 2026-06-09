@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.8...comfyui-touch-resize-v0.1.9) (2026-06-09)
+
+
+### Bug Fixes
+
+* **registry:** ship runtime-only files in the Comfy Registry tarball ([#26](https://github.com/laurigates/comfyui-touch-resize/issues/26)) ([273a5f1](https://github.com/laurigates/comfyui-touch-resize/commit/273a5f151342f1d656923db685afd52eeb48e96f))
+
 ## [0.1.8](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.7...comfyui-touch-resize-v0.1.8) (2026-06-08)
 
 
