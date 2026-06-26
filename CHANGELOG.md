@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.10](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.9...comfyui-touch-resize-v0.1.10) (2026-06-20)
+
+
+### Bug Fixes
+
+* pin comfyui-frontend-package to 3-part version (&gt;=1.40.0) ([#31](https://github.com/laurigates/comfyui-touch-resize/issues/31)) ([ea5ab7b](https://github.com/laurigates/comfyui-touch-resize/commit/ea5ab7b547a44b8b7f6de74e812589d1e4208d2a))
+
+
+### Miscellaneous
+
+* **deps:** remove Dependabot config, consolidate on Renovate ([#30](https://github.com/laurigates/comfyui-touch-resize/issues/30)) ([f8559dd](https://github.com/laurigates/comfyui-touch-resize/commit/f8559dd240e06f780bc9ac9e3bd7e3ebb0d36ddf))
+
 ## [0.1.9](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.8...comfyui-touch-resize-v0.1.9) (2026-06-09)
 
 
