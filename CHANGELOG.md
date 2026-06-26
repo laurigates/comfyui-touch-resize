@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.10...comfyui-touch-resize-v0.1.11) (2026-06-26)
+
+
+### Bug Fixes
+
+* **dist:** commit web/dist so git-based updates carry the built frontend ([#37](https://github.com/laurigates/comfyui-touch-resize/issues/37)) ([30ce1b5](https://github.com/laurigates/comfyui-touch-resize/commit/30ce1b5f0697466a74e333f8344c8563edf194c4))
+
 ## [0.1.10](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.9...comfyui-touch-resize-v0.1.10) (2026-06-20)
 
 
