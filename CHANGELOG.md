@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.11...comfyui-touch-resize-v0.1.12) (2026-06-28)
+
+
+### Miscellaneous
+
+* sync uv.lock and auto-bump it via release-please ([#40](https://github.com/laurigates/comfyui-touch-resize/issues/40)) ([790c33d](https://github.com/laurigates/comfyui-touch-resize/commit/790c33d2494fb5f47db849f91e75d959448516f0))
+
 ## [0.1.11](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.10...comfyui-touch-resize-v0.1.11) (2026-06-26)
 
 
