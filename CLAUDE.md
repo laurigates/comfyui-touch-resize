@@ -158,11 +158,23 @@ Unit tests cover the pure logic; these must be verified live (devtools console
   release + a touchend/touchcancel fallback + Escape/blur escape hatches (see
   the "Gesture exit" row above). Re-verify matrix #9–#10 on a real device.
 - **Post-resize LiteGraph drag state (risk #7):** the first finger's down
-  reaches LiteGraph before the lock, so after a resize the canvas got "stuck in
-  two-finger mode" (no pan / no tap-deselect) until an app-switch. Fixed by
-  dispatching a synthetic `pointercancel` to the canvas on release (see "Hand
-  the pointer back" above). Re-verify matrix #11 on a real device — and confirm
-  the synthetic cancel doesn't deselect or drop the corner hint.
+  reaches LiteGraph before the lock, so after a resize the canvas gets "stuck in
+  two-finger mode" (no pan / no tap-deselect) until an app-switch. **Confirmed
+  on-device (2026-07) that the synthetic-`pointercancel`-only fix was
+  insufficient — the stick persisted, recovering only by backgrounding Chrome.**
+  Root cause found in the frontend sourcemap: LiteGraph's own
+  `processMouseCancel` runs *only* `this.pointer.reset()` (release capture +
+  clear `isDown`/`dragStarted`) and does **not** clear the canvas-level drag
+  flags (`dragging_canvas`, `last_mouse_dragging`, `connecting_links`,
+  `state.draggingCanvas`, …) — those are cleared only by `processMouseUp`. So a
+  lone `pointercancel` under-clears and leaves the flags set (the stuck state).
+  Fix (`recoverNativePointerState`): keep the synthetic `pointercancel`, but
+  ALSO call `canvas.pointer.reset()` directly and clear the canvas-level drag
+  flags (the ones `processMouseUp` clears), all defensively/feature-detected;
+  selection is left untouched so the corner hint survives. **Re-verify matrix
+  #11 on a real device:** lift fingers after a resize → pan + single-tap
+  deselect + node-drag all work immediately, WITHOUT an app-switch, and the
+  selection/corner-hint is preserved.
 - **Anisotropic feel (risk #5):** finger rotation while spreading can feel
   unpredictable — validate on-device before flipping `mode` on by default.
 - **Hint coordinate space (risk #4):** current choice is constant-screen-size

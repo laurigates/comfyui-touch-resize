@@ -101,6 +101,20 @@ interface CanvasLike {
   onDrawForeground?:
     | ((this: CanvasLike, ctx: CanvasRenderingContext2D, visibleRect: unknown) => void)
     | null;
+  // Pointer / drag state we reset on gesture-release to recover LiteGraph from
+  // the "stuck in two-finger mode" it enters when we starve its event stream
+  // (see recoverNativePointerState). Names verified against the frontend
+  // sourcemap (CanvasPointer.ts / LGraphCanvas.ts). All optional — a build that
+  // lacks a field simply skips it.
+  pointer?: { reset?: () => void }; // CanvasPointer — reset() releases capture + clears isDown/dragStarted
+  state?: { draggingCanvas?: boolean; draggingItems?: boolean };
+  dragging_canvas?: boolean;
+  last_mouse_dragging?: boolean;
+  last_click_position?: unknown;
+  dragging_rectangle?: unknown;
+  connecting_links?: unknown;
+  resizingGroup?: unknown;
+  node_capturing_input?: unknown;
 }
 
 /**
@@ -505,17 +519,35 @@ function installGestureLayer(): void {
     true,
   );
 
-  // Hand the gesture's pointers back to LiteGraph so it tears down any drag/
-  // pan/pinch it began on the FIRST finger — whose pointerdown reached it before
-  // the second finger locked the gesture, after which we starved its event
-  // stream. Left mid-transaction, LiteGraph stays "stuck in two-finger mode"
-  // after a resize: the canvas won't pan and a tap won't deselect, until a
-  // window blur (app switch) resets it. A pointercancel is exactly the signal a
-  // blur sends, so we replay it on release to get the same clean recovery,
-  // automatically. Additive + defensive: a no-op if PointerEvent can't be
-  // constructed; our own listeners ignore it (isTrusted === false) so the
-  // synthetic event can't disturb the gesture's own state.
-  const cancelNativePointerState = (): void => {
+  // Recover LiteGraph's own pointer/drag state on gesture-release. The FIRST
+  // finger's pointerdown reaches LiteGraph before the second finger locks the
+  // gesture, so LiteGraph starts a drag/pan (setPointerCapture on that pointer
+  // + canvas-level drag flags) and we then starve its event stream. Left
+  // mid-transaction, LiteGraph stays "stuck in two-finger mode" after a resize:
+  // the canvas won't pan and a tap won't deselect, until a window blur (app
+  // switch) resets it.
+  //
+  // Grounded in the frontend sourcemap (CanvasPointer.ts / LGraphCanvas.ts):
+  //   • LiteGraph's own `processMouseCancel` runs ONLY `this.pointer.reset()`,
+  //     which releases pointer capture + clears isDown/dragStarted but does NOT
+  //     clear the canvas-level drag flags (dragging_canvas, last_mouse_dragging,
+  //     connecting_links, state.draggingCanvas, …). Those are cleared only by
+  //     `processMouseUp`. So a lone synthetic `pointercancel` UNDER-clears — the
+  //     drag flags stay set, which IS the stuck state. (The original code did
+  //     exactly this, which is why the stick persisted until an app-switch.)
+  //
+  // Two layers, both additive + defensive (feature-detected, wrapped) so this is
+  // a no-op on a build whose shape differs:
+  //   (a) replay the synthetic `pointercancel` — the faithful capture-teardown
+  //       LiteGraph's own handler consumes; our listeners ignore it (isTrusted
+  //       === false) so it can't perturb the gesture's own state; and
+  //   (b) directly reset the pointer AND clear the canvas-level drag flags that
+  //       pointercancel leaves set (the ones processMouseUp would clear), so pan
+  //       + tap-deselect work again immediately on finger-lift — no app-switch.
+  // Selection is deliberately left untouched (we never clear selected_nodes /
+  // selectedItems), so the corner-hint affordance survives the recovery.
+  const recoverNativePointerState = (): void => {
+    // (a) Faithful capture-teardown for the gesture's pointer ids.
     try {
       for (const id of gestureIds) {
         el.dispatchEvent(
@@ -523,9 +555,30 @@ function installGestureLayer(): void {
         );
       }
     } catch {
-      /* PointerEvent unavailable here — native corner-handle resize still works. */
+      /* PointerEvent unavailable here — the direct reset below still runs. */
     }
     gestureIds = [];
+
+    // (b) Authoritative reset via LiteGraph's real API surface. pointer.reset()
+    //     is what processMouseCancel calls; the flag clears finish what
+    //     pointercancel leaves set (what processMouseUp would have cleared).
+    try {
+      canvas.pointer?.reset?.();
+      if (canvas.state) {
+        canvas.state.draggingCanvas = false;
+        canvas.state.draggingItems = false;
+      }
+      canvas.dragging_canvas = false;
+      canvas.last_mouse_dragging = false;
+      canvas.last_click_position = null;
+      canvas.dragging_rectangle = null;
+      canvas.connecting_links = null;
+      canvas.resizingGroup = null;
+      canvas.node_capturing_input = null;
+      canvas.setDirty?.(true, true);
+    } catch (err) {
+      console.warn(`[${EXT_NAME}] native pointer-state recovery failed`, err);
+    }
   };
 
   // Force-release: drop the lock, forget every tracked pointer, and clean up
@@ -536,7 +589,7 @@ function installGestureLayer(): void {
   const forceRelease = (): void => {
     const released = controller.reset()?.type === "release";
     pointers.clear();
-    if (released) cancelNativePointerState();
+    if (released) recoverNativePointerState();
   };
 
   // Hedges for the native-zoom paths that don't surface as the pointer stream:
@@ -584,7 +637,7 @@ function installGestureLayer(): void {
     const cmd = controller.onPointerEnded(e.pointerId);
     if (cmd?.type === "release") {
       pointers.clear();
-      cancelNativePointerState();
+      recoverNativePointerState();
     }
   };
   captureRoot.addEventListener("pointerup", endPointer, true);
