@@ -234,19 +234,36 @@ function installGestureLayer() {
       applyResize(cmd);
     suppress(e);
   }, true);
-  const cancelNativePointerState = () => {
+  const recoverNativePointerState = () => {
     try {
       for (const id of gestureIds) {
         el.dispatchEvent(new PointerEvent("pointercancel", { pointerId: id, bubbles: true, cancelable: true }));
       }
     } catch {}
     gestureIds = [];
+    try {
+      canvas.pointer?.reset?.();
+      if (canvas.state) {
+        canvas.state.draggingCanvas = false;
+        canvas.state.draggingItems = false;
+      }
+      canvas.dragging_canvas = false;
+      canvas.last_mouse_dragging = false;
+      canvas.last_click_position = null;
+      canvas.dragging_rectangle = null;
+      canvas.connecting_links = null;
+      canvas.resizingGroup = null;
+      canvas.node_capturing_input = null;
+      canvas.setDirty?.(true, true);
+    } catch (err) {
+      console.warn(`[${EXT_NAME}] native pointer-state recovery failed`, err);
+    }
   };
   const forceRelease = () => {
     const released = controller.reset()?.type === "release";
     pointers.clear();
     if (released)
-      cancelNativePointerState();
+      recoverNativePointerState();
   };
   el.style.touchAction = "none";
   captureRoot.addEventListener("wheel", (e) => {
@@ -272,7 +289,7 @@ function installGestureLayer() {
     const cmd = controller.onPointerEnded(e.pointerId);
     if (cmd?.type === "release") {
       pointers.clear();
-      cancelNativePointerState();
+      recoverNativePointerState();
     }
   };
   captureRoot.addEventListener("pointerup", endPointer, true);
