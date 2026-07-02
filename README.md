@@ -2,9 +2,15 @@
 
 Selection-gated pinch-to-resize for ComfyUI nodes and groups on touch devices.
 
-> Part of a family of mobile-first ComfyUI usability packs
+> Part of a family of mobile-first ComfyUI usability packs, built on
+> [comfy-modal-kit](https://github.com/laurigates/comfy-modal-kit)
 > ([gallery-loader](https://github.com/laurigates/comfyui-gallery-loader),
-> [sampler-info](https://github.com/laurigates/comfyui-sampler-info)):
+> [model-gallery](https://github.com/laurigates/comfyui-model-gallery),
+> [prompt-editor](https://github.com/laurigates/comfyui-prompt-editor),
+> [sampler-info](https://github.com/laurigates/comfyui-sampler-info),
+> [touch-connect](https://github.com/laurigates/comfyui-touch-connect),
+> [touch-numeric](https://github.com/laurigates/comfyui-touch-numeric),
+> [touch-tooltips](https://github.com/laurigates/comfyui-touch-tooltips)):
 > touch-friendly gestures and HTML modals that replace clunky native
 > LiteGraph interactions, additive and non-clobbering.
 

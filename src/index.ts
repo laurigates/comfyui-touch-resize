@@ -25,6 +25,7 @@
 // tsconfig.json that points the import at `src/comfyui-shims.d.ts`. See the
 // migration ADR (docs/blueprint/adrs/0001-adopt-typescript-bun-build.md).
 
+import { claimPointer, isModalActive } from "@laurigates/comfy-modal-kit";
 import { app } from "/scripts/app.js";
 
 const EXT_NAME = "comfyui-touch-resize";
@@ -473,6 +474,13 @@ function installGestureLayer(): void {
     "pointerdown",
     (e: PointerEvent) => {
       if (!onCanvas(e)) return;
+      // Stand down while any pack's kit modal is open. The kit modal is a
+      // full-screen backdrop, so a canvas-targeted pointerdown already lands on
+      // it (and `onCanvas` bails) — this veto makes that intent explicit and
+      // robust to future non-backdrop modals. `isModalActive()` reflects a modal
+      // opened by ANY pack (all inlined kit copies share the `Symbol.for`
+      // global), which is the intended cross-pack coordination.
+      if (isModalActive()) return;
       pointers.set(e.pointerId, { id: e.pointerId, ...localPoint(e) });
       if (pointers.size === 2 && !controller.locked) {
         const targets = resolveTargets(canvas, CONFIG);
@@ -483,6 +491,9 @@ function installGestureLayer(): void {
         // pointer ids so we can hand them back to LiteGraph on release.
         if (cmd?.type === "lock") {
           gestureIds = pointerList().map((p) => p.id);
+          // Announce ownership of this gesture on the shared kit channel so
+          // peers can observe who holds the pointer (advisory / observability).
+          claimPointer("touch-resize");
           suppress(e);
         }
       }
