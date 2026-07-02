@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.12...comfyui-touch-resize-v0.1.13) (2026-07-02)
+
+
+### Features
+
+* adopt kit pointer-claim protocol (isModalActive veto + claimPointer) ([#45](https://github.com/laurigates/comfyui-touch-resize/issues/45)) ([9fa2eca](https://github.com/laurigates/comfyui-touch-resize/commit/9fa2eca62651931db20da85bf7ee47a372ee91a2))
+
 ## [0.1.12](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.11...comfyui-touch-resize-v0.1.12) (2026-06-28)
 
 
