@@ -9,6 +9,7 @@ compiled to browser ESM via `bun build`, emitted to `web/dist/` (see ADR-0001).
 | ID | Title | Domain |
 |----|-------|--------|
 | [ADR-0001](docs/blueprint/adrs/0001-adopt-typescript-bun-build.md) | Adopt TypeScript + bun build (supersedes the implicit no-bundler / single-file-JS decisions) | build-tooling |
+| [ADR-0002](docs/blueprint/adrs/0002-adopt-kit-pointer-claim-protocol.md) | Adopt the comfy-modal-kit pointer-claim protocol (`isModalActive` veto + `claimPointer`) | frontend-framework |
 
 ## The pattern ("the vein")
 
@@ -21,7 +22,7 @@ A mobile-first ComfyUI usability pack in the *gesture* vein: instead of intercep
 | `__init__.py` | Loader stub. Empty `NODE_CLASS_MAPPINGS`; exports `WEB_DIRECTORY = "./web/dist"`. |
 | `src/index.ts` | The extension — TypeScript source (port of the former single-file JS): canvas pointer layer + pure geometry helpers + the pure reducer. Compiled to `web/dist/index.js`. |
 | `src/comfyui-shims.d.ts` | Types the `/scripts/app.js` runtime import (see ADR-0001 type-seam notes). |
-| `web/dist/` | **Generated** — `bun build` output (`index.js`). Git-ignored; force-shipped to the registry via `[tool.comfy] includes`. Do not edit by hand. |
+| `web/dist/` | **Generated** — `bun build` output (`index.js`). Git-tracked (not git-ignored) and CI-sync-gated (`ci.yml` runs `git diff --exit-code -- web/dist`), so `git clone` / a touch-manager update carries the real served artifact; also force-shipped to the registry via `[tool.comfy] includes`. Rebuild with `bun run build` and commit alongside `src/` — do not edit by hand. |
 | `tsconfig.json` | TypeScript config — strict, `tsc --noEmit` type gate, `paths` shim. |
 | `knip.json` | Dead-code / unused-dependency check config. |
 | `pyproject.toml` | Comfy Registry metadata. `PublisherId` + `version` are the fields you touch. `[tool.comfy] includes = ["web/dist"]` force-ships the built artifact. |
@@ -49,9 +50,10 @@ pre-commit install
 just check                   # lint + typecheck + build + knip + test — the local CI gate
 ```
 
-The served file is the built `web/dist/index.js` (`web/dist/` is git-ignored
-and generated). After editing `src/index.ts` you must **`bun run build`** before
-hard-refreshing the tab. No ComfyUI restart is needed — only a rebuild + refresh.
+The served file is the built `web/dist/index.js` (generated, but git-tracked and
+CI-sync-gated — see the `web/dist/` row above). After editing `src/index.ts` you
+must **`bun run build`** and commit the rebuilt bundle before hard-refreshing the
+tab. No ComfyUI restart is needed — only a rebuild + refresh.
 
 ### Gates before commit
 

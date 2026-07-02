@@ -1,3 +1,21 @@
+// node_modules/@laurigates/comfy-modal-kit/dist/index.js
+var KEY = Symbol.for("laurigates.comfyModalKit");
+function getKit() {
+  const g = globalThis;
+  let kit = g[KEY];
+  if (!kit) {
+    kit = { fieldProviders: [], activeModal: null, pointerClaim: null };
+    g[KEY] = kit;
+  }
+  return kit;
+}
+function isModalActive() {
+  return getKit().activeModal !== null;
+}
+function claimPointer(id) {
+  getKit().pointerClaim = id;
+}
+
 // src/index.ts
 import { app } from "/scripts/app.js";
 var EXT_NAME = "comfyui-touch-resize";
@@ -212,6 +230,8 @@ function installGestureLayer() {
   captureRoot.addEventListener("pointerdown", (e) => {
     if (!onCanvas(e))
       return;
+    if (isModalActive())
+      return;
     pointers.set(e.pointerId, { id: e.pointerId, ...localPoint(e) });
     if (pointers.size === 2 && !controller.locked) {
       const targets = resolveTargets(canvas, CONFIG);
@@ -219,6 +239,7 @@ function installGestureLayer() {
       const cmd = controller.onPointersChanged(pointerList(), targets);
       if (cmd?.type === "lock") {
         gestureIds = pointerList().map((p) => p.id);
+        claimPointer("touch-resize");
         suppress(e);
       }
     }
