@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.14](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.13...comfyui-touch-resize-v0.1.14) (2026-07-04)
+
+
+### Bug Fixes
+
+* clear LiteGraph canvas drag flags on resize release ([#44](https://github.com/laurigates/comfyui-touch-resize/issues/44)) ([e0259aa](https://github.com/laurigates/comfyui-touch-resize/commit/e0259aac715b37fe02e63fc497015df2601a4ee5))
+
+
+### Documentation
+
+* **readme:** replace What-it-does TODO stub with real gesture description ([#48](https://github.com/laurigates/comfyui-touch-resize/issues/48)) ([66d273c](https://github.com/laurigates/comfyui-touch-resize/commit/66d273c7e1087b813b6f6625237d86d89c6da4b5))
+
 ## [0.1.13](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.12...comfyui-touch-resize-v0.1.13) (2026-07-02)
 
 
