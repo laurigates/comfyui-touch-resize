@@ -31,7 +31,25 @@ Restart ComfyUI; hard-refresh the browser tab (Ctrl+Shift+R / Cmd+Shift+R).
 
 ## What it does
 
-TODO — describe the widgets it enhances and the modal it opens.
+Adds a canvas-level touch gesture: **two-finger pinch to resize** whatever is
+selected. Tap a node or group to select it, then pinch with two fingers whose
+centroid lands inside the selection — the node/group grows or shrinks with the
+spread instead of the canvas zooming. While the pinch is locked, native
+canvas zoom is suppressed so the gesture doesn't fight the pan/zoom layer.
+
+- **Amber corner-bracket hint** — a faint `#ffb02e` bracket is painted on
+  selected nodes/groups as a discoverability affordance, staying roughly
+  constant on-screen size across zoom levels.
+- **Uniform vs anisotropic modes** — `uniform` (default) scales width and
+  height together; `aniso` lets a mostly-horizontal or mostly-vertical pinch
+  change one dimension independently.
+- **Additive, no-op fallback** — the pack only writes `node.size` / `group.size`
+  (already serialized), never clobbering existing behavior. If `app.canvas` or
+  the pointer model is absent it does nothing, so the native corner-handle
+  resize and canvas zoom keep working exactly as before.
+
+There are no custom nodes, widgets, or modals — this is a frontend-only canvas
+gesture layer.
 
 ## Compatibility
 
