@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.14...comfyui-touch-resize-v0.1.15) (2026-07-17)
+
+
+### Bug Fixes
+
+* **registry:** shrink registry tarball scan surface + hygiene guard ([#51](https://github.com/laurigates/comfyui-touch-resize/issues/51)) ([99ebb6c](https://github.com/laurigates/comfyui-touch-resize/commit/99ebb6c960a73ff82b4e2dfa3d530554e2d9f987))
+
 ## [0.1.14](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.13...comfyui-touch-resize-v0.1.14) (2026-07-04)
 
 
