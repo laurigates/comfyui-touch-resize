@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.16](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.15...comfyui-touch-resize-v0.1.16) (2026-07-30)
+
+
+### Features
+
+* **assets:** restyle the banner to the vector family ([#56](https://github.com/laurigates/comfyui-touch-resize/issues/56)) ([0d5bcfb](https://github.com/laurigates/comfyui-touch-resize/commit/0d5bcfbc13c5309aad2972ce20d3b321e61a79f3))
+
 ## [0.1.15](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.14...comfyui-touch-resize-v0.1.15) (2026-07-17)
 
 
