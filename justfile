@@ -77,7 +77,7 @@ check: lint typecheck build knip test
 # Documentation artifacts
 ##########
 
-# Regenerate docs/hint.png (the corner-hint affordance) via the screenshot generator.
+# Regenerate docs/handles.png (the corner grab-handles) via the screenshot generator.
 [group: "docs"]
 screenshots:
     docker build -f screenshots/Dockerfile -t comfyui-touch-resize-screenshots .

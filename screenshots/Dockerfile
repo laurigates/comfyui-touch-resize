@@ -30,7 +30,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_BREAK_SYSTEM_PACKAGES=1 \
-    EXPECTED_OUTPUTS="hint.png"
+    EXPECTED_OUTPUTS="handles.png"
 
 # Ubuntu Noble ships Python 3.12. We need pip + venv tooling and git
 # for the ComfyUI clone. curl is already present from the base image.

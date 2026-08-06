@@ -2,7 +2,7 @@
   "name": "comfyui-touch-resize",
   "private": true,
   "type": "module",
-  "description": "Selection-gated pinch-to-resize for ComfyUI nodes and groups on touch devices. TypeScript source in src/, built to web/dist/ via bun build. See ADR-0001.",
+  "description": "Big corner grab-handles for resizing ComfyUI nodes and groups on touch devices. TypeScript source in src/, built to web/dist/ via bun build. See ADR-0001.",
   "scripts": {
     "build": "bun build ./src/index.ts --target browser --format esm --banner '/* web/dist bundle built by bun from src/ in this repository (see package.json). Inlines @laurigates/comfy-modal-kit (MIT) - a first-party library by the same publisher, published to npm with provenance attestation: https://www.npmjs.com/package/@laurigates/comfy-modal-kit */' --outdir web/dist --external '/scripts/*'",
     "typecheck": "tsc --noEmit",
