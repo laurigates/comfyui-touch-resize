@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.16...comfyui-touch-resize-v0.2.0) (2026-08-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* replace the pinch gesture with corner grab-handles ([#58](https://github.com/laurigates/comfyui-touch-resize/issues/58))
+
+### Features
+
+* replace the pinch gesture with corner grab-handles ([#58](https://github.com/laurigates/comfyui-touch-resize/issues/58)) ([2a8a897](https://github.com/laurigates/comfyui-touch-resize/commit/2a8a89784d2cde169afe2343ccff43d9a31b0894)), closes [#5](https://github.com/laurigates/comfyui-touch-resize/issues/5)
+
 ## [0.1.16](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.15...comfyui-touch-resize-v0.1.16) (2026-07-30)
 
 
