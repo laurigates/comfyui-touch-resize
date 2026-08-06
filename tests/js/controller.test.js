@@ -1,253 +1,189 @@
 import { describe, expect, it } from "vitest";
-import { createGestureController } from "../../src/index.ts";
+import { createResizeController } from "../../src/index.ts";
 
-// The pure gesture reducer. No DOM, no app — just data in, commands out.
+// The pure drag reducer. No DOM, no app — just data in, commands out.
 
-const rectAt = (x, y, w, h) => ({ x, y, w, h });
-
-/** A node-like Target centered so a centroid at (50,50) lands inside. */
-const nodeTarget = (over = {}) => ({
+const target = (over = {}) => ({
   id: "node:1",
   kind: "node",
-  screenRect: rectAt(0, 0, 100, 100),
+  obj: {},
+  rect: { x: 0, y: 0, w: 200, h: 100 },
+  pos: [0, 0],
   size: [200, 100],
-  minSize: [50, 25],
+  minSize: [80, 40],
   ...over,
 });
 
-describe("createGestureController — lock", () => {
-  it("locks onto the target whose screenRect contains the pinch centroid", () => {
-    const c = createGestureController({ mode: "uniform" });
-    const cmd = c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [nodeTarget()],
-    );
-    expect(cmd).toEqual({ type: "lock", targetId: "node:1" });
+/** A pointer landing exactly on the bottom-right handle of the default target. */
+const onBr = (id = 1) => ({ id, x: 200, y: 100 });
+
+const grab = (controller, pointer = onBr(), t = target(), radius = 20) =>
+  controller.onPointerDown(pointer, t, radius);
+
+describe("grabbing a handle", () => {
+  it("locks onto the corner under the pointer", () => {
+    const c = createResizeController();
+    expect(c.locked).toBe(false);
+    expect(grab(c)).toEqual({ type: "grab", targetId: "node:1", corner: "br" });
+    expect(c.locked).toBe(true);
+    expect(c.activeCorner).toBe("br");
+  });
+
+  it("ignores a pointer that misses every handle", () => {
+    const c = createResizeController();
+    // Dead centre of the target — inside the node, but on no handle. This is
+    // the case that keeps a plain body-tap flowing through to LiteGraph.
+    expect(grab(c, { id: 1, x: 100, y: 50 })).toBe(null);
+    expect(c.locked).toBe(false);
+    expect(c.activeCorner).toBe(null);
+  });
+
+  it("ignores a null target (nothing selected, or a multi-selection)", () => {
+    const c = createResizeController();
+    expect(c.onPointerDown(onBr(), null, 20)).toBe(null);
+    expect(c.locked).toBe(false);
+  });
+
+  it("does not re-grab while already holding one", () => {
+    const c = createResizeController();
+    grab(c, onBr(1));
+    expect(grab(c, { id: 2, x: 0, y: 0 })).toBe(null);
+    expect(c.activeCorner).toBe("br");
+  });
+
+  it("grabs a group's handle on its own box", () => {
+    const c = createResizeController();
+    const g = target({
+      id: "group:7",
+      kind: "group",
+      rect: { x: 10, y: 20, w: 400, h: 300 },
+      pos: [10, 20],
+      size: [400, 300],
+      minSize: [140, 80],
+    });
+    expect(grab(c, { id: 1, x: 10, y: 20 }, g)).toEqual({
+      type: "grab",
+      targetId: "group:7",
+      corner: "tl",
+    });
+  });
+});
+
+describe("resizing", () => {
+  it("emits the new geometry as the pointer moves", () => {
+    const c = createResizeController();
+    grab(c);
+    expect(c.onPointerMoved({ id: 1, x: 250, y: 130 })).toEqual({
+      type: "resize",
+      targetId: "node:1",
+      pos: [0, 0],
+      size: [250, 130],
+    });
+  });
+
+  it("moves pos when a top-left handle is dragged", () => {
+    const c = createResizeController();
+    grab(c, { id: 1, x: 0, y: 0 });
+    expect(c.onPointerMoved({ id: 1, x: 30, y: 20 })).toEqual({
+      type: "resize",
+      targetId: "node:1",
+      pos: [30, 20],
+      size: [170, 80],
+    });
+  });
+
+  it("measures from the ORIGINAL geometry, not the previous frame", () => {
+    // Guards accumulation: three moves then a move back to the grab point must
+    // restore the start size exactly. An incremental reducer drifts here.
+    const c = createResizeController();
+    grab(c);
+    c.onPointerMoved({ id: 1, x: 260, y: 160 });
+    c.onPointerMoved({ id: 1, x: 210, y: 105 });
+    c.onPointerMoved({ id: 1, x: 400, y: 300 });
+    expect(c.onPointerMoved({ id: 1, x: 200, y: 100 })?.size).toEqual([200, 100]);
+  });
+
+  it("clamps at the target's minimum size", () => {
+    const c = createResizeController();
+    grab(c);
+    expect(c.onPointerMoved({ id: 1, x: -500, y: -500 })?.size).toEqual([80, 40]);
+  });
+
+  it("ignores a move from a pointer that is not holding the grab", () => {
+    // A second finger wandering the canvas must not drive someone else's drag.
+    const c = createResizeController();
+    grab(c, onBr(1));
+    expect(c.onPointerMoved({ id: 2, x: 400, y: 400 })).toBe(null);
+  });
+
+  it("emits nothing when no handle is held", () => {
+    const c = createResizeController();
+    expect(c.onPointerMoved({ id: 1, x: 10, y: 10 })).toBe(null);
+  });
+});
+
+describe("releasing", () => {
+  it("releases on the pointer that holds the grab", () => {
+    const c = createResizeController();
+    grab(c, onBr(7));
+    expect(c.onPointerEnded(7)).toEqual({ type: "release", targetId: "node:1" });
+    expect(c.locked).toBe(false);
+    expect(c.activeCorner).toBe(null);
+  });
+
+  it("ignores another pointer lifting", () => {
+    const c = createResizeController();
+    grab(c, onBr(7));
+    expect(c.onPointerEnded(9)).toBe(null);
     expect(c.locked).toBe(true);
   });
 
-  it("does not lock when the centroid is outside every target", () => {
-    const c = createGestureController({ mode: "uniform" });
-    const cmd = c.onPointersChanged(
-      [
-        { id: 1, x: 500, y: 500 },
-        { id: 2, x: 520, y: 500 },
-      ],
-      [nodeTarget()],
-    );
-    expect(cmd).toBe(null);
-    expect(c.locked).toBe(false);
-  });
-
-  it("does not lock with fewer than two pointers", () => {
-    const c = createGestureController({ mode: "uniform" });
-    expect(c.onPointersChanged([{ id: 1, x: 50, y: 50 }], [nodeTarget()])).toBe(null);
-  });
-
-  it("does not re-lock while already locked", () => {
-    const c = createGestureController({ mode: "uniform" });
-    const pts = [
-      { id: 1, x: 40, y: 50 },
-      { id: 2, x: 60, y: 50 },
-    ];
-    c.onPointersChanged(pts, [nodeTarget()]);
-    const second = c.onPointersChanged(pts, [nodeTarget({ id: "node:2" })]);
-    expect(second).toBe(null);
-  });
-
-  it("locks the first matching target when several overlap", () => {
-    const c = createGestureController({ mode: "uniform" });
-    const cmd = c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [nodeTarget({ id: "node:a" }), nodeTarget({ id: "node:b" })],
-    );
-    expect(cmd.targetId).toBe("node:a");
-  });
-});
-
-describe("createGestureController — resize (uniform)", () => {
-  it("scales by the pinch-distance ratio", () => {
-    const c = createGestureController({ mode: "uniform" });
-    // start distance = 20 (x 40..60)
-    c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [nodeTarget()],
-    );
-    // current distance = 40 → ratio 2.0
-    const cmd = c.onPointersMoved([
-      { id: 1, x: 30, y: 50 },
-      { id: 2, x: 70, y: 50 },
-    ]);
-    expect(cmd).toEqual({ type: "resize", targetId: "node:1", size: [400, 200] });
-  });
-
-  it("clamps to the target minSize on shrink", () => {
-    const c = createGestureController({ mode: "uniform" });
-    c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [nodeTarget()], // minSize [50,25]
-    );
-    // current distance = 2 → ratio 0.1 → 200*0.1=20 < 50, 100*0.1=10 < 25
-    const cmd = c.onPointersMoved([
-      { id: 1, x: 49, y: 50 },
-      { id: 2, x: 51, y: 50 },
-    ]);
-    expect(cmd.size).toEqual([50, 25]);
-  });
-
-  it("returns null when not locked", () => {
-    const c = createGestureController({ mode: "uniform" });
-    expect(
-      c.onPointersMoved([
-        { id: 1, x: 0, y: 0 },
-        { id: 2, x: 5, y: 5 },
-      ]),
-    ).toBe(null);
-  });
-
-  it("returns null when a finger has lifted (fewer than two pointers)", () => {
-    const c = createGestureController({ mode: "uniform" });
-    c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [nodeTarget()],
-    );
-    expect(c.onPointersMoved([{ id: 1, x: 40, y: 50 }])).toBe(null);
-  });
-});
-
-describe("createGestureController — kind-agnostic (groups)", () => {
-  it("locks and resizes a group target through the same path", () => {
-    const c = createGestureController({ mode: "uniform" });
-    const groupTarget = nodeTarget({ id: "group:3", kind: "group", minSize: [140, 80] });
-    const lock = c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [groupTarget],
-    );
-    expect(lock).toEqual({ type: "lock", targetId: "group:3" });
-    const resize = c.onPointersMoved([
-      { id: 1, x: 30, y: 50 },
-      { id: 2, x: 70, y: 50 },
-    ]);
-    expect(resize).toEqual({ type: "resize", targetId: "group:3", size: [400, 200] });
-  });
-});
-
-describe("createGestureController — resize (aniso)", () => {
-  it("resizes width and height independently from the finger vector", () => {
-    const c = createGestureController({ mode: "aniso", anisoEps: 8 });
-    // start vector spans (20, 20): fingers diagonal.
-    c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 40 },
-        { id: 2, x: 60, y: 60 },
-      ],
-      [nodeTarget({ screenRect: rectAt(0, 0, 200, 200) })],
-    );
-    // current vector (40, 20): x span doubled, y span unchanged.
-    const cmd = c.onPointersMoved([
-      { id: 1, x: 30, y: 40 },
-      { id: 2, x: 70, y: 60 },
-    ]);
-    expect(cmd.size).toEqual([400, 100]); // w 200→400, h unchanged
-  });
-
-  it("defaults to uniform scaling when mode is unset", () => {
-    const c = createGestureController({}); // no mode
-    c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [nodeTarget()],
-    );
-    const cmd = c.onPointersMoved([
-      { id: 1, x: 30, y: 50 },
-      { id: 2, x: 70, y: 50 },
-    ]);
-    expect(cmd.size).toEqual([400, 200]); // uniform ratio 2.0 on both axes
-  });
-});
-
-describe("createGestureController — release", () => {
-  const lockTwo = (c) =>
-    c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [nodeTarget()],
-    );
-
-  it("releases when one of the two gesture pointers lifts", () => {
-    const c = createGestureController({ mode: "uniform" });
-    lockTwo(c);
-    const cmd = c.onPointerEnded(1);
-    expect(cmd).toEqual({ type: "release", targetId: "node:1" });
-    expect(c.locked).toBe(false);
-  });
-
-  it("releases on the other gesture pointer too", () => {
-    const c = createGestureController({ mode: "uniform" });
-    lockTwo(c);
-    expect(c.onPointerEnded(2)).toEqual({ type: "release", targetId: "node:1" });
-    expect(c.locked).toBe(false);
-  });
-
-  it("ignores a stray pointer that was not part of the gesture", () => {
-    const c = createGestureController({ mode: "uniform" });
-    lockTwo(c);
-    // A third finger touched down and lifts again — the pinch must survive.
-    expect(c.onPointerEnded(99)).toBe(null);
-    expect(c.locked).toBe(true);
-  });
-
-  it("force-releases on a null id (non-pointer exit paths)", () => {
-    const c = createGestureController({ mode: "uniform" });
-    lockTwo(c);
+  it("force-releases with a null id", () => {
+    const c = createResizeController();
+    grab(c, onBr(7));
     expect(c.onPointerEnded(null)).toEqual({ type: "release", targetId: "node:1" });
     expect(c.locked).toBe(false);
   });
 
-  it("returns null when releasing without a lock", () => {
-    const c = createGestureController({ mode: "uniform" });
-    expect(c.onPointerEnded(1)).toBe(null);
-  });
-});
-
-describe("createGestureController — reset", () => {
-  it("drops an active lock and reports the released target", () => {
-    const c = createGestureController({ mode: "uniform" });
-    c.onPointersChanged(
-      [
-        { id: 1, x: 40, y: 50 },
-        { id: 2, x: 60, y: 50 },
-      ],
-      [nodeTarget()],
-    );
+  it("reset() drops the grab unconditionally", () => {
+    // The escape hatch behind Escape / window blur / a second finger arriving.
+    const c = createResizeController();
+    grab(c, onBr(7));
     expect(c.reset()).toEqual({ type: "release", targetId: "node:1" });
     expect(c.locked).toBe(false);
   });
 
-  it("is a no-op when nothing is locked", () => {
-    const c = createGestureController({ mode: "uniform" });
+  it("releasing and reset() are no-ops when idle", () => {
+    const c = createResizeController();
+    expect(c.onPointerEnded(1)).toBe(null);
     expect(c.reset()).toBe(null);
+  });
+
+  it("stops emitting resizes after release", () => {
+    const c = createResizeController();
+    grab(c);
+    c.onPointerEnded(1);
+    expect(c.onPointerMoved({ id: 1, x: 400, y: 400 })).toBe(null);
+  });
+
+  it("can grab again after releasing", () => {
+    const c = createResizeController();
+    grab(c);
+    c.onPointerEnded(1);
+    expect(grab(c, { id: 2, x: 0, y: 0 })).toEqual({
+      type: "grab",
+      targetId: "node:1",
+      corner: "tl",
+    });
+  });
+});
+
+describe("hit radius", () => {
+  it("scales with the radius it is given", () => {
+    // The adapter passes hitRadiusPx / ds.scale, so the touch target stays a
+    // constant physical size while the graph-space radius changes with zoom.
+    const near = { id: 1, x: 215, y: 100 }; // 15 graph units from the br handle
+    expect(grab(createResizeController(), near, target(), 20)).not.toBe(null);
+    expect(grab(createResizeController(), near, target(), 10)).toBe(null);
   });
 });

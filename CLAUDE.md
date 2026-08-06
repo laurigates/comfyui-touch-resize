@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Frontend-only ComfyUI custom-node pack in the canvas-gesture vein. `__init__.py`
+Frontend-only ComfyUI custom-node pack in the canvas-affordance vein. `__init__.py`
 is a loader stub; the extension is authored in TypeScript (`src/index.ts`) and
 compiled to browser ESM via `bun build`, emitted to `web/dist/` (see ADR-0001).
 
@@ -10,17 +10,30 @@ compiled to browser ESM via `bun build`, emitted to `web/dist/` (see ADR-0001).
 |----|-------|--------|
 | [ADR-0001](docs/blueprint/adrs/0001-adopt-typescript-bun-build.md) | Adopt TypeScript + bun build (supersedes the implicit no-bundler / single-file-JS decisions) | build-tooling |
 | [ADR-0002](docs/blueprint/adrs/0002-adopt-kit-pointer-claim-protocol.md) | Adopt the comfy-modal-kit pointer-claim protocol (`isModalActive` veto + `claimPointer`) | frontend-framework |
+| [ADR-0003](docs/blueprint/adrs/0003-corner-handles-over-pinch-gesture.md) | Resize via corner grab-handles, replacing the two-finger pinch gesture | frontend-framework |
 
 ## The pattern ("the vein")
 
-A mobile-first ComfyUI usability pack in the *gesture* vein: instead of intercepting a single widget, a frontend JS extension adds a CANVAS-LEVEL pointer layer. A two-finger pinch whose centroid lands inside a **selected** node (single tap selects it) resizes that node and suppresses the native canvas zoom for the gesture's duration. The enhancement is **additive** (no-op fallback if `app.canvas` or the pointer model is absent — native corner-handle resize still works), **touch-first**, and never breaks serialized workflows (it only writes `node.size`, which is already serialized). Pure geometry helpers live at the top of the extension and are unit-tested; DOM/canvas wiring stays below them.
+A mobile-first ComfyUI usability pack in the *canvas-affordance* vein: instead of
+intercepting a single widget, a frontend JS extension paints controls onto the
+canvas and adds a CANVAS-LEVEL pointer layer to drive them. When exactly one node
+or group is selected, four big amber circles are drawn at the corners of its
+resizable body; a `pointerdown` within a handle's hit radius starts a resize that
+anchors the opposite corner. The enhancement is **additive** (no-op fallback if
+`app.canvas` or the pointer model is absent — native corner-handle resize still
+works), **touch-first**, and never breaks serialized workflows (it writes only
+`pos`/`size`, both already serialized). Pure geometry helpers live at the top of
+the extension and are unit-tested; DOM/canvas wiring stays below them.
+
+**This pack used to be a pinch-gesture pack.** ADR-0003 records why that was
+replaced and what it cost; read it before reintroducing any multi-finger idea.
 
 ## File layout
 
 | Path | Purpose |
 |------|---------|
 | `__init__.py` | Loader stub. Empty `NODE_CLASS_MAPPINGS`; exports `WEB_DIRECTORY = "./web/dist"`. |
-| `src/index.ts` | The extension — TypeScript source (port of the former single-file JS): canvas pointer layer + pure geometry helpers + the pure reducer. Compiled to `web/dist/index.js`. |
+| `src/index.ts` | The extension: pure geometry helpers + the pure reducer + the canvas pointer layer + the handle painter. Compiled to `web/dist/index.js`. |
 | `src/comfyui-shims.d.ts` | Types the `/scripts/app.js` runtime import (see ADR-0001 type-seam notes). |
 | `web/dist/` | **Generated** — `bun build` output (`index.js`). Git-tracked (not git-ignored) and CI-sync-gated (`ci.yml` runs `git diff --exit-code -- web/dist`), so `git clone` / a touch-manager update carries the real served artifact; also force-shipped to the registry via `[tool.comfy] includes`. Rebuild with `bun run build` and commit alongside `src/` — do not edit by hand. |
 | `tsconfig.json` | TypeScript config — strict, `tsc --noEmit` type gate, `paths` shim. |
@@ -29,6 +42,7 @@ A mobile-first ComfyUI usability pack in the *gesture* vein: instead of intercep
 | `package.json` | Dev toolchain — `bun build`, `tsc`, Vitest, Biome, knip. |
 | `.github/workflows/` | `ci.yml` (ruff/biome/typecheck+build/pytest/vitest/gitleaks), `publish.yml` (builds, then auto-publishes on version bump), `release-please.yml`. |
 | `tests/` | pytest stub suite. `tests/js/` Vitest suite for the pure helpers + reducer in `src/index.ts`. |
+| `screenshots/` | Containerized Playwright driver that regenerates `docs/handles.png`. |
 | `justfile` | `lint`, `format`, `typecheck`, `build`, `knip`, `test`, `check` recipes — the local CI gate. |
 
 ## Hard rules
@@ -36,10 +50,20 @@ A mobile-first ComfyUI usability pack in the *gesture* vein: instead of intercep
 - **Pack directory name is part of the URL.** The built `web/dist/index.js` is
   served at `/extensions/comfyui-touch-resize/index.js`. Renaming the pack dir
   breaks every fetch. If unavoidable, sync `EXT_NAME` in `src/index.ts`.
+- **Never listen to `touchstart`/`touchmove`/`touchend`, and never set
+  `touch-action`.** ComfyUI's built-in `Comfy.SimpleTouchSupport` keeps a global
+  `touchCount` from those events and gates `LGraphCanvas.processMouseDown` on it;
+  swallowing one side of the count kills tap handling canvas-wide. This layer is
+  **pointer-events only**. See the API table below and ADR-0003.
+- **Assign `pos`/`size`; never mutate the arrays in place.** `LGraphNode`'s
+  setters push geometry into the Vue layout store — an in-place
+  `obj.size[0] = w` skips them and desynchronizes it.
 - **No Python dependencies. The pack is frontend-only; a feature genuinely needing Python belongs in a separate companion pack.**
-- **Additive only.** Never clobber an existing tooltip/control; fall back to
-  the native widget when there's no match. Never fabricate data.
-- **Canvas pointer model is version-sensitive.** The pinch layer reads `app.canvas` / `ds.scale` / `ds.offset` and the pointer-event stream. Keep the no-op fallback (do nothing when they are absent) so native corner-handle resize always works.
+- **Additive only.** Never clobber an existing control; fall back to the native
+  behavior when there's no match. Never fabricate data.
+- **Canvas pointer model is version-sensitive.** The layer reads `app.canvas` /
+  `ds.scale` / `ds.offset` and the pointer-event stream. Keep the no-op fallback
+  (do nothing when they are absent) so native corner-handle resize always works.
 
 ## Dev workflow
 
@@ -74,113 +98,107 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8188/extensions/comfyu
 
 ## Architecture: pure controller + thin adapter
 
-`src/index.ts` is split so the gesture logic is testable without a
-browser (no jsdom — by design, matching the other packs in the vein):
+`src/index.ts` is split so the drag logic is testable without a browser (no
+jsdom — by design, matching the other packs in the vein):
 
-- **Pure helpers** (exported, unit-tested): `pinchDistance`, `centroid`,
-  `pointInRect`, `nodeScreenRect`, `groupScreenRect`, `scaledSize`, `anisoSize`,
-  `cornerHintPath`, `selectedNodes`, `selectedGroups`, `resolveTargets`.
-- **`createGestureController(cfg)`** — a PURE reducer. Holds private lock state;
-  takes plain pointer/target data; returns `{type:"lock"|"resize"|"release"}`
-  commands. Never touches the DOM or `app`. This is where the lock / scale /
-  clamp / release decisions live, and it is exhaustively unit-tested
-  (`tests/js/controller.test.js`). The lock records its two **pointer ids**, so
-  `onPointerEnded(id)` releases the moment *either* gesture finger lifts (a stray
-  third touch can't strand it), and `reset()` is an unconditional force-release
-  for the adapter's non-pointer exits.
-- **`installGestureLayer()`** — thin DOM adapter: pointer/wheel events → data,
-  controller commands → `node.size`/`group.size` mutation. Per gesture it calls
-  `resolveTargets()` and keeps a `targetId → Target` map to apply commands. On
-  release it **hands the gesture's pointers back to LiteGraph** with a synthetic
-  `pointercancel` so LiteGraph clears the drag it began on the first finger (see
-  the "Hand the pointer back" row in the API table).
-- **`installAffordance(canvas, cfg)`** — instance-chains `onDrawForeground` to
-  stroke the corner hint (additive; the previous handler still runs).
+- **Pure helpers** (exported, unit-tested): `screenToGraph`, `nodeHandleRect`,
+  `groupHandleRect`, `handleCenters`, `hitTestHandles`, `resizeFromCorner`,
+  `selectedNodes`, `selectedGroups`, `selectedResizables`, `resolveTarget`.
+- **`createResizeController()`** — a PURE reducer. Holds private grab state;
+  takes a pointer, a normalized target and a hit radius; returns
+  `{type:"grab"|"resize"|"release"}` commands. Never touches the DOM or `app`,
+  and is exhaustively unit-tested (`tests/js/controller.test.js`). It measures
+  every frame from the ORIGINAL geometry and the total delta since the grab, so
+  rounding and clamping never accumulate.
+- **`installHandleLayer(canvas, el)`** — thin DOM adapter: pointer events → data,
+  commands → `pos`/`size` mutation. Returns the controller so the painter can
+  read `activeCorner`.
+- **`installAffordance(canvas, cfg, activeCorner)`** — instance-chains
+  `onDrawForeground` to paint the handles (additive; the previous handler still
+  runs). The grabbed handle is drawn enlarged so a fingertip covering it still
+  shows which corner is being dragged.
 
-Targets are normalized so nodes and groups share one resize path. They are
-discriminated by **shape, not `instanceof`** (the LGraphGroup class is renamed
-under minification / forks): a node has `computeSize()`, a group has
-`pos`+`size`+string `title` and no `computeSize`, a reroute has no `size`.
+Targets are normalized so nodes and groups share one resize path, discriminated
+by **shape, not `instanceof`** (the LGraphGroup class is renamed under
+minification / forks): a node has `computeSize()`, a group has `pos`+`size`+string
+`title` and no `computeSize`, a reroute has no `size`.
 
-`CONFIG` (module constant near the top) is the only knob — no in-UI settings for
-v1. `mode` (`"uniform"`|`"aniso"`), `groupMinSize`, `showHint`/`hintColor`/
-`hintAlpha`/`hintSizePx`, `anisoEps`. `hintColor` is a vivid accent (default
-`#ffb02e`) rather than white so the grab affordance stands out against both the
-node body and the white selection outline.
+`Target.rect` (where handles are drawn and hit-tested) is the item's **visual
+outline**, which is not the same as its `pos`/`size` for a node:
+
+| Kind | Handle rect | Why |
+|---|---|---|
+| node | visual outline — `pos[1] - titleHeight` … `pos[1] + size[1]` | A node's `pos` is its BODY's top-left; the title is drawn above. Handles on the body's top corners land **~17px from the first input/output slots** — inside the hit radius — so tapping a slot on a selected node grabs a handle instead of starting a link drag. The title-bar corners are ~21px from the collapse toggle and ~45px from the slots. Both figures measured off a real KSampler render (`docs/handles.png`). |
+| group | the box as-is | A group's `pos` already IS its visual top-left (title drawn inside). The top handles do sit on the group's drag strip, but it spans the full width (≥140), so only its ends are covered. |
+
+**`CONFIG.hitRadiusPx` has a measured ceiling** of ~20 because of the collapse-toggle
+clearance above. Re-measure before raising it.
+
+`Target.pos`/`size` remain the item's own geometry, which is what a resize
+writes; the two differ by a constant, so `resizeFromCorner` needs no special
+case. It is formulated around the fixed **anchor** corner rather than by adding
+the delta to the size — that is what makes the min-size clamp pin `pos` instead
+of letting the box slide away once a dimension bottoms out.
+
+`CONFIG` (module constant near the top) is the only knob — no in-UI settings.
+`showHandles`, `handleRadiusPx` (drawn) vs `hitRadiusPx` (touch target — these
+are deliberately decoupled), `fillColor`/`strokeColor`/`alpha`, `activeScale`,
+`groupMinSize`.
 
 ## Verified frontend API (from the sourcemap)
 
-Checked against
-`.venv/.../comfyui_frontend_package/static/assets/api-vjhDtP5R.js.map`
-(LiteGraph is bundled there; grep `sourcesContent`). Re-verify after a
-`comfyui-frontend-package` bump:
+Checked against `comfyui_frontend_package` **1.45.14**
+(`.venv/.../static/assets/api-vjhDtP5R.js.map`; LiteGraph and the core
+extensions are bundled there — `python3` + `json.load` over `sourcesContent` is
+the way to read it). Re-verify after a `comfyui-frontend-package` bump.
 
 | Symbol | Finding |
 |---|---|
-| `LiteGraph.NODE_TITLE_HEIGHT` | `= 30` (matches `DEFAULT_TITLE_HEIGHT`). |
-| `canvas.selectedItems` | `Set<Positionable>` — "All selected nodes, groups, and reroutes". Groups ARE individually selectable; no separate store needed. |
+| `ds.convertCanvasToOffset(p)` | `p / scale - offset` — the screen→graph inverse `screenToGraph` implements. `convertOffsetToCanvas` is `(p + offset) * scale`. CSS pixels; **no devicePixelRatio factor**. |
+| `canvas.convertEventToCanvasOffset(e)` | `convertCanvasToOffset([clientX - rect.left, clientY - rect.top])` — the authoritative conversion, and exactly what the adapter reproduces. |
+| `ds.toCanvasContext(ctx)` | `ctx.scale(scale)` then `ctx.translate(offset)`. The canvas-level `onDrawForeground?.(ctx, visible_area)` call sits INSIDE that transform block, so the painter draws in **graph space** and divides on-screen lengths by `ds.scale`. |
+| `LiteGraph.NODE_TITLE_HEIGHT` | `= 30`. `LGraphGroup.titleHeight` returns it. |
+| `canvas.selectedItems` | `Set<Positionable>` — nodes, groups, and reroutes. Groups ARE individually selectable. |
 | `canvas.selected_nodes` | `Dictionary<LGraphNode>` (nodes only). |
-| `LGraphGroup.pos` / `.size` | getters/setters over `_pos`/`_size`. **`size` setter self-clamps** to `minWidth=140`/`minHeight=80`. |
-| `LGraphGroup.recomputeInsideNodes()` | present; called after a group resize so it re-memberships the right nodes. |
-| `LGraphGroup.id` | defaults to `-1`, not guaranteed unique → target key falls back to selection index. |
-| Native zoom | **wheel-driven** (`processMouseWheel` → `ds.changeScale`; browsers send pinch-zoom as ctrl+wheel). The pack therefore intercepts `wheel` (capture, `passive:false`) while a gesture is locked, in addition to `stopImmediatePropagation` on pointer events. |
-| Listener phase (critical) | LiteGraph binds its pointer/wheel handlers on the **canvas element** in its constructor — *before* our `setup()`. Those events TARGET that element, so in the `AT_TARGET` phase listeners fire in **registration order, capture flag ignored** → a capture listener on `el` still runs *after* LiteGraph and loses the race. The suppression layer therefore binds on an **ancestor (`window`) in the capture phase**, which provably precedes any `AT_TARGET` listener. Without this the canvas zooms *and* the node body-drags while we resize (groups felt fine only because they drag by their title bar, not their body). |
-| Gesture exit (don't strand the lock) | Suppressing the move stream (`preventDefault` + `touch-action:none`) can make a build that derives pointer events from touch **drop the gesture pointers' terminal `pointerup`/`pointercancel`** — leaving the lock stuck with suppression eating every wheel/touch, so the user can't recover. Defenses, in layers: (1) the lock owns its two pointer ids → release on the *first* to lift; (2) **don't** suppress `touchend`/`touchcancel` — instead use them as a fallback exit (`touches.length < 2` ⇒ release); (3) `pointercancel` force-releases the whole gesture; (4) **Escape** and window **`blur`** are guaranteed manual exits independent of the touch/pointer stream. |
-| Hand the pointer back to LiteGraph on release (critical) | The FIRST finger's `pointerdown` reaches LiteGraph *before* the second finger locks the gesture, so LiteGraph starts a drag/pan; we then starve its event stream. When our resize ends, LiteGraph is left mid-transaction with a pointer it still thinks is down → **"stuck in two-finger mode": the canvas won't pan and a tap won't deselect** until a window `blur` (app switch) resets it. Fix: on *every* release the adapter **dispatches a synthetic `pointercancel`** (`isTrusted:false`) to the canvas for the gesture's pointer ids — the exact signal a blur sends — so LiteGraph tears down its own drag state automatically. Our listeners ignore non-trusted events so the synthetic cancel can't perturb the gesture. Additive: a no-op if `PointerEvent` can't be constructed. |
+| `LGraphGroup.pos` setter | Writes `_pos` only — **no side effects**, does not move member nodes. Safe to assign during a resize. |
+| `LGraphGroup.size` setter | Self-clamps to `minWidth=140`/`minHeight=80`; `CONFIG.groupMinSize` mirrors that so our `pos` math agrees with what is stored. |
+| `LGraphNode.pos` / `.size` setters | **Also call `useLayoutMutations().moveNode` / `.resizeNode`** — the Vue layout store. An in-place array write bypasses them. `setSize(size)` = assign + `onResize?.()`; prefer it for nodes. |
+| `node.flags.pinned` / `group.pinned` | "Prevents the node being accidentally moved or **resized** by mouse interaction." Pinned items get no handles. |
+| `node.flags.collapsed` | No body to grab → no handles. |
+| Listener phase (critical) | LiteGraph binds its pointer handlers on the **canvas element** in its constructor — *before* our `setup()`. Those events TARGET that element, so in the `AT_TARGET` phase listeners fire in **registration order, capture flag ignored** → a capture listener on `el` still runs *after* LiteGraph and loses the race. The layer therefore binds on an **ancestor (`window`) in the capture phase**, which provably precedes any `AT_TARGET` listener. This is what lets the grab's `pointerdown` be suppressed before LiteGraph opens a drag transaction. |
+| `Comfy.SimpleTouchSupport` (critical) | Core extension `src/extensions/core/simpleTouchSupport.ts`. Keeps a module-global **`touchCount`** (`+= changedTouches.length` on `touchstart`, `-=` on `touchend`) and monkey-patches `LGraphCanvas.prototype.processMouseDown` to **return early while `touchZooming \|\| touchCount`** is truthy (and `processMouseMove` while `touchCount > 1`). Swallowing `touchstart` without swallowing `touchend` drives the count **negative** — truthy — so the canvas stops responding to taps until `resetTouchState` fires on `touchcancel`/`visibilitychange` (i.e. an app switch). **This was v1's "stuck in two-finger mode".** Hence the pointer-events-only hard rule. |
+| Touch pinch-zoom | Lives in that same file: a `touchmove` handler on `canvasEl.parentElement` driving `ds.scale`/`ds.offset` when `touches.length === 2`. **Not** wheel-driven on a touchscreen (the old CLAUDE.md claimed otherwise); `processMouseWheel` is the trackpad/ctrl+wheel path. A second finger during a drag therefore aborts our resize and lets this take over. |
+| Long-press right-click | Same file: a >600ms stationary touch dispatches a **synthetic** `pointerdown`/`pointerup` on the canvas. The adapter ignores `!e.isTrusted`, so these can't start a phantom grab. |
+| `Comfy.VueNodes.Enabled` | Nodes 2.0 DOM rendering. `defaultValue: false` (true only for cloud/desktop installs from 1.41.0). Canvas-drawn handles are invisible in that mode — a known limitation, documented in the README. |
 
 ## Browser smoke matrix (manual)
 
 Unit tests cover the pure logic; these must be verified live (devtools console
 + a touch device or emulated touch). Hard-refresh the tab after editing.
+**None of these have been run against v2 yet** — issue #5 tracks it.
 
 | # | Check | Expect |
 |---|---|---|
-| 1 | Pinch inside a selected node | node resizes (uniform) |
-| 2 | Pinch inside a selected group | group resizes + inside-node membership recomputes |
-| 3 | Pinch on empty canvas / unselected item | native zoom still works |
-| 4 | Native bottom-right corner handle | still resizes (additive, not clobbered) |
-| 5 | Min-size clamp | node floors at `computeSize()`; group floors at 140×80 |
-| 6 | Corner hint | faint bracket on selected node/group; stays ~constant size across zoom |
-| 7 | `CONFIG.mode = "aniso"` | horizontal-only / vertical-only pinch changes W or H independently |
-| 8 | Endpoint reachable | the `curl` check above returns `200` |
-| 9 | Exit the resize | lift either finger → gesture ends immediately; native zoom/pan work again right after |
-| 10 | Stuck-state recovery | if a resize ever sticks, **Escape** or switching apps (window blur) drops it |
-| 11 | Post-resize canvas | right after a resize: panning, single-tap deselect, and node-drag all work without an app-switch (LiteGraph drag state was handed back) |
+| 1 | Select a node | four amber circles on the node's outline corners (title bar included) |
+| 2 | Select a group | four circles on the group box's corners |
+| 3 | Select two or more items | no handles at all |
+| 4 | Select a pinned or collapsed node | no handles |
+| 5 | Drag the bottom-right handle | node grows; `pos` does not move |
+| 6 | Drag the top-left handle | node grows toward the top-left; the bottom-right corner stays put |
+| 7 | Drag any handle past the minimum | size floors (node at `computeSize()`, group at 140×80) and the anchored corner stays pinned — the box must not slide |
+| 8 | Zoom far in / far out, then look at the handles | circles stay the same on-screen size and stay hittable |
+| 9 | Tap the node body / a slot / the collapse toggle | all behave normally — the layer only claims handle hits, and the clearances above must hold |
+| 10 | Tap empty canvas / pan / two-finger pinch-zoom | all native behavior unaffected |
+| 11 | **After a resize, tap the canvas** | selection changes normally — no "stuck" canvas, no app-switch needed (this is the v1 regression; `touchCount` must stay ≥ 0) |
+| 12 | Second finger down mid-drag | resize abandons; pinch-zoom takes over cleanly |
+| 13 | Escape / switch apps mid-drag | drag ends; canvas usable immediately |
+| 14 | Resize a group | member nodes recomputed (drag the group — it carries the right nodes) |
+| 15 | Save + reload the workflow | the new size persists |
+| 16 | Endpoint reachable | the `curl` check above returns `200` |
 
-**Open items still needing a real device** (sourcemap can't settle these):
-
-- **Native-zoom suppression (risk #2):** ~~confirm the `wheel` interceptor~~
-  **Resolved on-device:** the original wiring bound on `el`, so LiteGraph's
-  earlier-registered handlers won the `AT_TARGET` race and the canvas zoomed
-  (and nodes body-dragged) *while* resizing. The suppression layer now binds on
-  `window` in the capture phase (see "Listener phase" above), plus a
-  `touchstart/move` hedge and `touch-action:none`. Re-verify matrix #1–#3.
-- **Gesture exit (risk #6):** the same suppression could strand the lock when a
-  build drops the gesture pointers' terminal events — fixed with id-based
-  release + a touchend/touchcancel fallback + Escape/blur escape hatches (see
-  the "Gesture exit" row above). Re-verify matrix #9–#10 on a real device.
-- **Post-resize LiteGraph drag state (risk #7):** the first finger's down
-  reaches LiteGraph before the lock, so after a resize the canvas gets "stuck in
-  two-finger mode" (no pan / no tap-deselect) until an app-switch. **Confirmed
-  on-device (2026-07) that the synthetic-`pointercancel`-only fix was
-  insufficient — the stick persisted, recovering only by backgrounding Chrome.**
-  Root cause found in the frontend sourcemap: LiteGraph's own
-  `processMouseCancel` runs *only* `this.pointer.reset()` (release capture +
-  clear `isDown`/`dragStarted`) and does **not** clear the canvas-level drag
-  flags (`dragging_canvas`, `last_mouse_dragging`, `connecting_links`,
-  `state.draggingCanvas`, …) — those are cleared only by `processMouseUp`. So a
-  lone `pointercancel` under-clears and leaves the flags set (the stuck state).
-  Fix (`recoverNativePointerState`): keep the synthetic `pointercancel`, but
-  ALSO call `canvas.pointer.reset()` directly and clear the canvas-level drag
-  flags (the ones `processMouseUp` clears), all defensively/feature-detected;
-  selection is left untouched so the corner hint survives. **Re-verify matrix
-  #11 on a real device:** lift fingers after a resize → pan + single-tap
-  deselect + node-drag all work immediately, WITHOUT an app-switch, and the
-  selection/corner-hint is preserved.
-- **Anisotropic feel (risk #5):** finger rotation while spreading can feel
-  unpredictable — validate on-device before flipping `mode` on by default.
-- **Hint coordinate space (risk #4):** current choice is constant-screen-size
-  (legs divided by `ds.scale`); confirm it reads well at extreme zoom.
+To watch `touchCount` while testing #11, there is no exported handle on it —
+verify behaviorally (taps keep working after ten resizes) rather than by reading
+the variable.
 
 ## Releases
 

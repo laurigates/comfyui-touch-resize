@@ -23,53 +23,68 @@ import { app } from "/scripts/app.js";
 var EXT_NAME = "comfyui-touch-resize";
 var DEFAULT_TITLE_HEIGHT = 30;
 var CONFIG = {
-  mode: "uniform",
-  groupMinSize: [140, 80],
-  showHint: true,
-  hintColor: "#ffb02e",
-  hintAlpha: 0.9,
-  hintSizePx: 18,
-  anisoEps: 8
+  showHandles: true,
+  handleRadiusPx: 10,
+  hitRadiusPx: 18,
+  fillColor: "#ffb02e",
+  strokeColor: "#1a1a1a",
+  alpha: 0.95,
+  activeScale: 1.35,
+  groupMinSize: [140, 80]
 };
-function pinchDistance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+function screenToGraph(point, scale, offset) {
+  const s = scale || 1;
+  return { x: point.x / s - offset[0], y: point.y / s - offset[1] };
 }
-function centroid(a, b) {
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-}
-function pointInRect(x, y, rect) {
-  return x >= rect.x && y >= rect.y && x <= rect.x + rect.w && y <= rect.y + rect.h;
-}
-function nodeScreenRect(node, scale, offset, titleHeight = DEFAULT_TITLE_HEIGHT) {
-  const x = (node.pos[0] + offset[0]) * scale;
-  const yBody = (node.pos[1] + offset[1]) * scale;
+function nodeHandleRect(node, titleHeight = DEFAULT_TITLE_HEIGHT) {
   return {
-    x,
-    y: yBody - titleHeight * scale,
-    w: node.size[0] * scale,
-    h: node.size[1] * scale + titleHeight * scale
+    x: node.pos[0],
+    y: node.pos[1] - titleHeight,
+    w: node.size[0],
+    h: node.size[1] + titleHeight
   };
 }
-function scaledSize(startSize, ratio, minSize = [0, 0]) {
-  return [Math.max(minSize[0], startSize[0] * ratio), Math.max(minSize[1], startSize[1] * ratio)];
+function groupHandleRect(group) {
+  return { x: group.pos[0], y: group.pos[1], w: group.size[0], h: group.size[1] };
 }
-function anisoSize(startSize, startVec, curVec, minSize = [0, 0], eps = 8) {
-  const startLen = Math.hypot(startVec[0], startVec[1]) || 1;
-  const uniform = Math.hypot(curVec[0], curVec[1]) / startLen;
-  const axisRatio = (start, cur) => Math.abs(start) <= eps ? uniform : Math.abs(cur) / Math.abs(start);
+function handleCenters(rect) {
+  const { x, y, w, h } = rect;
   return [
-    Math.max(minSize[0], startSize[0] * axisRatio(startVec[0], curVec[0])),
-    Math.max(minSize[1], startSize[1] * axisRatio(startVec[1], curVec[1]))
+    { corner: "tl", x, y },
+    { corner: "tr", x: x + w, y },
+    { corner: "bl", x, y: y + h },
+    { corner: "br", x: x + w, y: y + h }
   ];
 }
-function cornerHintPath(rect, sizePx) {
-  const x = rect.x + rect.w;
-  const y = rect.y + rect.h;
-  return [
-    { x, y: y - sizePx },
-    { x, y },
-    { x: x - sizePx, y }
-  ];
+function hitTestHandles(point, centers, radius) {
+  let best = null;
+  let bestDistSq = radius * radius;
+  for (const c of centers) {
+    const dx = point.x - c.x;
+    const dy = point.y - c.y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq <= bestDistSq) {
+      bestDistSq = distSq;
+      best = c.corner;
+    }
+  }
+  return best;
+}
+function resizeFromCorner(startPos, startSize, corner, delta, minSize = [0, 0]) {
+  const left = corner === "tl" || corner === "bl";
+  const top = corner === "tl" || corner === "tr";
+  const minW = Math.max(0, minSize[0] ?? 0);
+  const minH = Math.max(0, minSize[1] ?? 0);
+  const anchorX = left ? startPos[0] + startSize[0] : startPos[0];
+  const anchorY = top ? startPos[1] + startSize[1] : startPos[1];
+  const dragX = (left ? startPos[0] : startPos[0] + startSize[0]) + delta[0];
+  const dragY = (top ? startPos[1] : startPos[1] + startSize[1]) + delta[1];
+  const w = Math.max(minW, left ? anchorX - dragX : dragX - anchorX);
+  const h = Math.max(minH, top ? anchorY - dragY : dragY - anchorY);
+  return {
+    pos: [left ? anchorX - w : anchorX, top ? anchorY - h : anchorY],
+    size: [w, h]
+  };
 }
 function selectedNodes(canvas) {
   if (!canvas)
@@ -82,33 +97,30 @@ function selectedNodes(canvas) {
   }
   return [];
 }
-function groupScreenRect(group, scale, offset) {
-  return {
-    x: (group.pos[0] + offset[0]) * scale,
-    y: (group.pos[1] + offset[1]) * scale,
-    w: group.size[0] * scale,
-    h: group.size[1] * scale
-  };
-}
 function selectedGroups(canvas) {
   if (!(canvas?.selectedItems instanceof Set))
     return [];
   return [...canvas.selectedItems].filter((it) => it?.pos && it?.size && typeof it.title === "string" && typeof it.computeSize !== "function");
 }
-function resolveTargets(canvas, cfg = CONFIG) {
-  const scale = canvas?.ds?.scale ?? 1;
-  const offset = canvas?.ds?.offset ?? [0, 0];
+function isResizable(it, kind) {
+  const pinned = it.pinned === true || it.flags?.pinned === true;
+  if (pinned)
+    return false;
+  return !(kind === "node" && it.flags?.collapsed === true);
+}
+function selectedResizables(canvas, cfg = CONFIG) {
   const targets = [];
   const nodes = selectedNodes(canvas);
   for (let i = 0;i < nodes.length; i++) {
     const n = nodes[i];
-    if (!n)
+    if (!n || !isResizable(n, "node"))
       continue;
     targets.push({
       id: `node:${n.id ?? i}`,
       kind: "node",
       obj: n,
-      screenRect: nodeScreenRect(n, scale, offset),
+      rect: nodeHandleRect(n),
+      pos: [n.pos[0], n.pos[1]],
       size: [n.size[0], n.size[1]],
       minSize: typeof n.computeSize === "function" ? n.computeSize() : [0, 0]
     });
@@ -116,280 +128,220 @@ function resolveTargets(canvas, cfg = CONFIG) {
   const groups = selectedGroups(canvas);
   for (let i = 0;i < groups.length; i++) {
     const g = groups[i];
-    if (!g)
+    if (!g || !isResizable(g, "group"))
       continue;
     const key = g.id != null && g.id !== -1 ? g.id : `idx${i}`;
     targets.push({
       id: `group:${key}`,
       kind: "group",
       obj: g,
-      screenRect: groupScreenRect(g, scale, offset),
+      rect: groupHandleRect(g),
+      pos: [g.pos[0], g.pos[1]],
       size: [g.size[0], g.size[1]],
       minSize: cfg.groupMinSize ?? [0, 0]
     });
   }
   return targets;
 }
-function createGestureController(cfg = CONFIG) {
-  let lock = null;
+function resolveTarget(canvas, cfg = CONFIG) {
+  const targets = selectedResizables(canvas, cfg);
+  return targets.length === 1 ? targets[0] ?? null : null;
+}
+function createResizeController() {
+  let grab = null;
   return {
-    onPointersChanged(pointers, targets) {
-      if (pointers.length !== 2 || lock)
+    onPointerDown(pointer, target, hitRadius) {
+      if (grab || !target)
         return null;
-      const [p1, p2] = pointers;
-      if (!p1 || !p2)
+      const corner = hitTestHandles(pointer, handleCenters(target.rect), hitRadius);
+      if (!corner)
         return null;
-      const c = centroid(p1, p2);
-      for (const t of targets) {
-        if (pointInRect(c.x, c.y, t.screenRect)) {
-          lock = {
-            targetId: t.id,
-            pointerIds: [p1.id, p2.id],
-            startDist: pinchDistance(p1, p2) || 1,
-            startVec: [p2.x - p1.x, p2.y - p1.y],
-            startSize: [t.size[0], t.size[1]],
-            minSize: t.minSize ?? [0, 0]
-          };
-          return { type: "lock", targetId: t.id };
-        }
-      }
-      return null;
+      grab = {
+        targetId: target.id,
+        pointerId: pointer.id,
+        corner,
+        startPos: [target.pos[0], target.pos[1]],
+        startSize: [target.size[0], target.size[1]],
+        startPoint: { x: pointer.x, y: pointer.y },
+        minSize: target.minSize ?? [0, 0]
+      };
+      return { type: "grab", targetId: target.id, corner };
     },
-    onPointersMoved(pointers) {
-      if (!lock || pointers.length < 2)
+    onPointerMoved(pointer) {
+      if (!grab || pointer.id !== grab.pointerId)
         return null;
-      const [p1, p2] = pointers;
-      if (!p1 || !p2)
-        return null;
-      let size;
-      if (cfg.mode === "aniso") {
-        const curVec = [p2.x - p1.x, p2.y - p1.y];
-        size = anisoSize(lock.startSize, lock.startVec, curVec, lock.minSize, cfg.anisoEps);
-      } else {
-        const ratio = pinchDistance(p1, p2) / lock.startDist;
-        size = scaledSize(lock.startSize, ratio, lock.minSize);
-      }
-      return { type: "resize", targetId: lock.targetId, size };
+      const delta = [pointer.x - grab.startPoint.x, pointer.y - grab.startPoint.y];
+      const { pos, size } = resizeFromCorner(grab.startPos, grab.startSize, grab.corner, delta, grab.minSize);
+      return { type: "resize", targetId: grab.targetId, pos, size };
     },
     onPointerEnded(pointerId) {
-      if (!lock)
+      if (!grab)
         return null;
-      if (pointerId != null && !lock.pointerIds.includes(pointerId))
+      if (pointerId != null && pointerId !== grab.pointerId)
         return null;
-      const { targetId } = lock;
-      lock = null;
+      const { targetId } = grab;
+      grab = null;
       return { type: "release", targetId };
     },
     reset() {
-      if (!lock)
-        return null;
-      const { targetId } = lock;
-      lock = null;
-      return { type: "release", targetId };
+      return this.onPointerEnded(null);
     },
     get locked() {
-      return lock !== null;
+      return grab !== null;
+    },
+    get activeCorner() {
+      return grab?.corner ?? null;
     }
   };
 }
-function installGestureLayer() {
-  const canvas = app.canvas;
-  const el = canvas?.canvas;
-  if (!canvas || !el) {
-    console.warn(`[${EXT_NAME}] no canvas element — gesture layer not installed`);
-    return;
-  }
-  const controller = createGestureController(CONFIG);
-  const pointers = new Map;
-  let targetsById = new Map;
-  let gestureIds = [];
-  const localPoint = (e) => {
+function installHandleLayer(canvas, el) {
+  const controller = createResizeController();
+  let activeTarget = null;
+  const graphPoint = (e) => {
     const r = el.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return screenToGraph({ x: e.clientX - r.left, y: e.clientY - r.top }, canvas.ds?.scale ?? 1, canvas.ds?.offset ?? [0, 0]);
   };
-  const pointerList = () => [...pointers.values()];
-  const captureRoot = window;
+  const pointerOf = (e) => ({ id: e.pointerId, ...graphPoint(e) });
   const onCanvas = (e) => e.target === el || (el.contains?.(e.target) ?? false);
-  const applyResize = (cmd) => {
-    const t = targetsById.get(cmd.targetId);
-    if (!t)
-      return;
-    const [w, h] = cmd.size;
-    t.obj.size[0] = w;
-    t.obj.size[1] = h;
-    if (t.kind === "group") {
-      t.obj.recomputeInsideNodes?.();
-    } else {
-      t.obj.onResize?.(t.obj.size);
-    }
-    canvas.setDirty?.(true, true);
-  };
+  const captureRoot = window;
   const suppress = (e) => {
     e.stopImmediatePropagation();
     if (e.cancelable)
       e.preventDefault();
   };
-  captureRoot.addEventListener("pointerdown", (e) => {
-    if (!onCanvas(e))
+  const applyResize = (cmd) => {
+    const t = activeTarget;
+    if (!t || t.id !== cmd.targetId)
       return;
-    if (isModalActive())
-      return;
-    pointers.set(e.pointerId, { id: e.pointerId, ...localPoint(e) });
-    if (pointers.size === 2 && !controller.locked) {
-      const targets = resolveTargets(canvas, CONFIG);
-      targetsById = new Map(targets.map((t) => [t.id, t]));
-      const cmd = controller.onPointersChanged(pointerList(), targets);
-      if (cmd?.type === "lock") {
-        gestureIds = pointerList().map((p) => p.id);
-        claimPointer("touch-resize");
-        suppress(e);
-      }
+    const [x, y] = cmd.pos;
+    const [w, h] = cmd.size;
+    if (t.obj.pos[0] !== x || t.obj.pos[1] !== y)
+      t.obj.pos = [x, y];
+    if (t.kind === "group") {
+      t.obj.size = [w, h];
+      t.obj.recomputeInsideNodes?.();
+    } else if (typeof t.obj.setSize === "function") {
+      t.obj.setSize([w, h]);
+    } else {
+      t.obj.size = [w, h];
+      t.obj.onResize?.(t.obj.size);
     }
-  }, true);
-  captureRoot.addEventListener("pointermove", (e) => {
-    if (!pointers.has(e.pointerId))
-      return;
-    pointers.set(e.pointerId, { id: e.pointerId, ...localPoint(e) });
-    if (!controller.locked)
-      return;
-    const cmd = controller.onPointersMoved(pointerList());
-    if (cmd?.type === "resize")
-      applyResize(cmd);
-    suppress(e);
-  }, true);
-  const recoverNativePointerState = () => {
-    try {
-      for (const id of gestureIds) {
-        el.dispatchEvent(new PointerEvent("pointercancel", { pointerId: id, bubbles: true, cancelable: true }));
-      }
-    } catch {}
-    gestureIds = [];
-    try {
-      canvas.pointer?.reset?.();
-      if (canvas.state) {
-        canvas.state.draggingCanvas = false;
-        canvas.state.draggingItems = false;
-      }
-      canvas.dragging_canvas = false;
-      canvas.last_mouse_dragging = false;
-      canvas.last_click_position = null;
-      canvas.dragging_rectangle = null;
-      canvas.connecting_links = null;
-      canvas.resizingGroup = null;
-      canvas.node_capturing_input = null;
-      canvas.setDirty?.(true, true);
-    } catch (err) {
-      console.warn(`[${EXT_NAME}] native pointer-state recovery failed`, err);
-    }
+    canvas.setDirty?.(true, true);
+  };
+  const endGrab = () => {
+    activeTarget = null;
+    canvas.setDirty?.(true, true);
   };
   const forceRelease = () => {
-    const released = controller.reset()?.type === "release";
-    pointers.clear();
-    if (released)
-      recoverNativePointerState();
+    if (controller.reset())
+      endGrab();
   };
-  el.style.touchAction = "none";
-  captureRoot.addEventListener("wheel", (e) => {
-    if (controller.locked && onCanvas(e))
-      suppress(e);
-  }, { capture: true, passive: false });
-  for (const type of ["touchstart", "touchmove"]) {
-    captureRoot.addEventListener(type, (e) => {
-      if (controller.locked && onCanvas(e))
-        suppress(e);
-    }, { capture: true, passive: false });
-  }
-  const onTouchEnd = (e) => {
-    if (controller.locked && (e.touches?.length ?? 0) < 2)
-      forceRelease();
-  };
-  captureRoot.addEventListener("touchend", onTouchEnd, true);
-  captureRoot.addEventListener("touchcancel", onTouchEnd, true);
-  const endPointer = (e) => {
+  captureRoot.addEventListener("pointerdown", (e) => {
     if (!e.isTrusted)
       return;
-    pointers.delete(e.pointerId);
-    const cmd = controller.onPointerEnded(e.pointerId);
-    if (cmd?.type === "release") {
-      pointers.clear();
-      recoverNativePointerState();
+    if (!onCanvas(e))
+      return;
+    if (controller.locked) {
+      forceRelease();
+      return;
     }
+    if (isModalActive())
+      return;
+    const target = resolveTarget(canvas, CONFIG);
+    if (!target)
+      return;
+    const scale = canvas.ds?.scale || 1;
+    const cmd = controller.onPointerDown(pointerOf(e), target, CONFIG.hitRadiusPx / scale);
+    if (!cmd)
+      return;
+    activeTarget = target;
+    claimPointer("touch-resize");
+    suppress(e);
+    canvas.setDirty?.(true, true);
+  }, true);
+  captureRoot.addEventListener("pointermove", (e) => {
+    if (!e.isTrusted || !controller.locked)
+      return;
+    const cmd = controller.onPointerMoved(pointerOf(e));
+    if (!cmd)
+      return;
+    applyResize(cmd);
+    suppress(e);
+  }, true);
+  const endPointer = (e) => {
+    if (!e.isTrusted || !controller.locked)
+      return;
+    if (!controller.onPointerEnded(e.pointerId))
+      return;
+    endGrab();
+    suppress(e);
   };
   captureRoot.addEventListener("pointerup", endPointer, true);
-  captureRoot.addEventListener("pointercancel", (e) => {
-    if (!e.isTrusted)
-      return;
-    pointers.delete(e.pointerId);
-    if (controller.locked)
-      forceRelease();
-  }, true);
+  captureRoot.addEventListener("pointercancel", endPointer, true);
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && controller.locked)
+    if (e.key === "Escape")
       forceRelease();
   });
-  window.addEventListener("blur", () => {
-    if (controller.locked)
-      forceRelease();
-  });
-  console.log(`[${EXT_NAME}] gesture layer installed — pinch a selected node to resize`);
+  window.addEventListener("blur", forceRelease);
+  console.log(`[${EXT_NAME}] handle layer installed — select a node, drag a corner circle`);
+  return controller;
 }
-function drawHints(ctx, canvas, cfg) {
-  const scale = canvas?.ds?.scale ?? 1;
-  const items = [...selectedNodes(canvas), ...selectedGroups(canvas)];
-  if (!items.length)
+function drawHandles(ctx, canvas, cfg, activeCorner) {
+  const target = resolveTarget(canvas, cfg);
+  if (!target)
     return;
-  const sizeG = cfg.hintSizePx / scale;
+  const scale = canvas.ds?.scale || 1;
+  const radius = cfg.handleRadiusPx / scale;
   ctx.save();
-  ctx.globalAlpha = cfg.hintAlpha;
-  ctx.strokeStyle = cfg.hintColor;
-  ctx.lineWidth = 2.5 / scale;
-  for (const it of items) {
-    const pts = cornerHintPath({ x: it.pos[0], y: it.pos[1], w: it.size[0], h: it.size[1] }, sizeG);
+  ctx.globalAlpha = cfg.alpha;
+  ctx.fillStyle = cfg.fillColor;
+  ctx.strokeStyle = cfg.strokeColor;
+  ctx.lineWidth = 2 / scale;
+  for (const handle of handleCenters(target.rect)) {
+    const r = handle.corner === activeCorner ? radius * cfg.activeScale : radius;
     ctx.beginPath();
-    const first = pts[0];
-    if (!first)
-      continue;
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1;i < pts.length; i++) {
-      const pt = pts[i];
-      if (pt)
-        ctx.lineTo(pt.x, pt.y);
-    }
+    ctx.arc(handle.x, handle.y, r, 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
   }
   ctx.restore();
 }
-function installAffordance(canvas, cfg) {
-  if (!canvas || !cfg.showHint)
+function installAffordance(canvas, cfg, activeCorner) {
+  if (!canvas || !cfg.showHandles)
     return;
   const prev = canvas.onDrawForeground;
   canvas.onDrawForeground = function(ctx, visibleRect) {
     prev?.call(this, ctx, visibleRect);
     try {
-      drawHints(ctx, this, cfg);
+      drawHandles(ctx, this, cfg, activeCorner());
     } catch (err) {
-      console.warn(`[${EXT_NAME}] hint draw failed`, err);
+      console.warn(`[${EXT_NAME}] handle draw failed`, err);
     }
   };
 }
 app.registerExtension({
   name: "comfy.touch-resize",
   async setup() {
-    installGestureLayer();
-    installAffordance(app.canvas, CONFIG);
+    const canvas = app.canvas;
+    const el = canvas?.canvas;
+    if (!canvas || !el) {
+      console.warn(`[${EXT_NAME}] no canvas element — handle layer not installed`);
+      return;
+    }
+    const controller = installHandleLayer(canvas, el);
+    installAffordance(canvas, CONFIG, () => controller.activeCorner);
   }
 });
 export {
+  selectedResizables,
   selectedNodes,
   selectedGroups,
-  scaledSize,
-  resolveTargets,
-  pointInRect,
-  pinchDistance,
-  nodeScreenRect,
-  groupScreenRect,
-  createGestureController,
-  cornerHintPath,
-  centroid,
-  anisoSize
+  screenToGraph,
+  resolveTarget,
+  resizeFromCorner,
+  nodeHandleRect,
+  hitTestHandles,
+  handleCenters,
+  groupHandleRect,
+  createResizeController
 };
