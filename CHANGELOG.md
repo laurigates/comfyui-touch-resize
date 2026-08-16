@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.2.0...comfyui-touch-resize-v0.2.1) (2026-08-16)
+
+
+### Miscellaneous
+
+* **ci:** guard registry-health against closing on Pending; drop duplicate Renovate runner ([#61](https://github.com/laurigates/comfyui-touch-resize/issues/61)) ([21f39d0](https://github.com/laurigates/comfyui-touch-resize/commit/21f39d0bce26595eb10df5059a2adfd341a8774e))
+
 ## [0.2.0](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.1.16...comfyui-touch-resize-v0.2.0) (2026-08-06)
 
 
