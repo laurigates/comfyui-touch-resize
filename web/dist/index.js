@@ -333,15 +333,15 @@ app.registerExtension({
   }
 });
 export {
-  selectedResizables,
-  selectedNodes,
-  selectedGroups,
-  screenToGraph,
-  resolveTarget,
-  resizeFromCorner,
-  nodeHandleRect,
-  hitTestHandles,
-  handleCenters,
+  createResizeController,
   groupHandleRect,
-  createResizeController
+  handleCenters,
+  hitTestHandles,
+  nodeHandleRect,
+  resizeFromCorner,
+  resolveTarget,
+  screenToGraph,
+  selectedGroups,
+  selectedNodes,
+  selectedResizables
 };
