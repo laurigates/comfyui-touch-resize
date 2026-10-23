@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.2.1...comfyui-touch-resize-v0.2.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **deps:** bump @laurigates/comfy-modal-kit to ^0.14.0 and rebuild web/dist ([#67](https://github.com/laurigates/comfyui-touch-resize/issues/67)) ([be148dd](https://github.com/laurigates/comfyui-touch-resize/commit/be148dd48769c9826dd4e599277b1723b93feb83)), closes [#64](https://github.com/laurigates/comfyui-touch-resize/issues/64)
+
 ## [0.2.1](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.2.0...comfyui-touch-resize-v0.2.1) (2026-08-16)
 
 
