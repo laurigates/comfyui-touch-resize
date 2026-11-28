@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.4](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.2.3...comfyui-touch-resize-v0.2.4) (2026-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency playwright to v1.55.1 [security] ([#72](https://github.com/laurigates/comfyui-touch-resize/issues/72)) ([566fbe7](https://github.com/laurigates/comfyui-touch-resize/commit/566fbe70604aa6909e485b8b52815d048d7c3160))
+
+
+### Miscellaneous
+
+* **claude:** reconcile Claude Code config with the repo baseline ([#76](https://github.com/laurigates/comfyui-touch-resize/issues/76)) ([cca5c38](https://github.com/laurigates/comfyui-touch-resize/commit/cca5c386203e4d2aa5d7395e1947248788f2d2d7))
+* **deps:** update dependency virtualenv to v21.14.10 [security] ([#81](https://github.com/laurigates/comfyui-touch-resize/issues/81)) ([7b10292](https://github.com/laurigates/comfyui-touch-resize/commit/7b102925e8fd28d570a3c1b3d915dfd17a2f96a4))
+
 ## [0.2.3](https://github.com/laurigates/comfyui-touch-resize/compare/comfyui-touch-resize-v0.2.2...comfyui-touch-resize-v0.2.3) (2026-11-16)
 
 
